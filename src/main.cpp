@@ -2,11 +2,10 @@
 
 #define LOG Serial
 
-
-void dump(const char* msg, const uint8_t* buf, int len) {
+void dump(const char* msg, const uint8_t* buf = nullptr, int len = 0) {
   if (msg) {
-      Serial.print(msg);
-      Serial.print(": ");
+    Serial.print(msg);
+    Serial.print(": ");
   }
   for (int i = 0; i < len; i++) {
     if (buf[i] < 0x10) {
@@ -19,7 +18,6 @@ void dump(const char* msg, const uint8_t* buf, int len) {
   }
   Serial.println();
 }
-
 
 #include <NimBLEDevice.h>
 
@@ -36,6 +34,8 @@ static NimBLECharacteristic* pTXCharacteristic = nullptr;
 static NimBLECharacteristic* pRXCharacteristic = nullptr;
 
 int state = 0;
+uint8_t recvbuf[256];
+uint8_t recvsize = 0;
 uint8_t sendbuf[256];
 uint8_t sendsize = 0;
 PaseContext* pase;
@@ -49,23 +49,15 @@ class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
 
   void onWrite(NimBLECharacteristic* pCharacteristic) {
     if (pCharacteristic == pTXCharacteristic) {
-      Serial.print("RECV:[");
       auto v = pCharacteristic->getValue();
+      Serial.print("RECV:[");
       for (auto c : v) {
         Serial.print(",");
         Serial.print(c, HEX);
       }
       Serial.println("]");
-
-      if (state == 0) {
-        pase = new PaseContext();  // todo delete
-        sendsize = make_handshake_res(pase, v.data(), v.size(), sendbuf);
-      } else if (state == 2) {
-        sendsize = make_pbdkres(pase, v.data(), v.size(), sendbuf);
-      } else if (state == 4) {
-        sendsize = make_pake2(pase, v.data(), v.size(), sendbuf);
-      }
-      state++;
+      recvsize = v.size();
+      memcpy(recvbuf, v.data(), recvsize);
     } else {
       Serial.print(pCharacteristic->getUUID().toString().c_str());
       Serial.print(": onWrite(), value: ");
@@ -117,9 +109,6 @@ class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
 static CharacteristicCallbacks chrCallbacks;
 
 #define BLE_ADVERTISEMENT_VERSION 0
-#define DEVICE_DISCRIMINATOR 3840
-#define BLE_VENDOR_ID 0xFFF1
-#define BLE_PRODUCT_ID 0x8001
 
 void startAdv() {
   NimBLEAdvertisementData data;
@@ -142,6 +131,7 @@ void startAdv() {
 void setup() {
   LOG.begin(115200);
   LOG.println("Starting BLE work!");
+  // testSPAKE2p_draft01();
 
   NimBLEDevice::init("ESP32");
 
@@ -169,14 +159,30 @@ void setup() {
 }
 
 void loop() {
-  if (sendsize > 0) {
-    delay(50);
-    // BTP Handshake Response
-    pRXCharacteristic->setValue(sendbuf, sendsize);
-    pRXCharacteristic->notify();
-    state++;
-    sendsize = 0;
-    LOG.println("SEND RESPONSE");
+  if (recvsize > 0) {
+    delay(100);
+    if (recvbuf[0] == 0x65) {
+      state = 0;  // start handshake
+    }
+    if (state == 0) {
+      pase = new PaseContext();  // todo delete
+      sendsize = make_handshake_res(pase, recvbuf, recvsize, sendbuf);
+    } else if (state == 1) {
+      sendsize = make_pbdkres(pase, recvbuf, recvsize, sendbuf);
+    } else if (state == 2) {
+      sendsize = make_pake2(pase, recvbuf, recvsize, sendbuf);
+    }
+    recvsize = 0;
+    if (sendsize > 0) {
+      state++;
+      pRXCharacteristic->setValue(sendbuf, sendsize);
+      pRXCharacteristic->notify();
+      LOG.print("SEND RESPONSE ");
+      LOG.print(sendsize);
+      LOG.println(" bytes");
+    } else {
+      state = 0;
+    }
   }
   delay(1);
 }

@@ -14,8 +14,20 @@ struct SHA256 {
   void update(const uint8_t *buf, uint32_t len) {
     mbedtls_sha256_update(&ctx, buf, len);
   }
-  void finish(uint8_t *out) { mbedtls_sha256_finish(&ctx, out); }
-  ~SHA256() { mbedtls_sha256_free(&ctx); }
+  void updateBlock(const uint8_t *buf, uint32_t len) {
+    uint8_t dummy[4] = {0};
+    mbedtls_sha256_update(&ctx, (uint8_t *)&len, 4);  // todo byte order
+    mbedtls_sha256_update(&ctx, dummy, 4);
+    // dump("TT block", (uint8_t *)&len, 4);
+    // dump("TT block", buf, len);
+    if (len > 0) {
+      mbedtls_sha256_update(&ctx, buf, len);
+    }
+  }
+  void finish(uint8_t *out) {
+    mbedtls_sha256_finish(&ctx, out);
+    mbedtls_sha256_free(&ctx);
+  }
 };
 
 static void pbkdf2_sha256_hmac(const uint8_t *password, size_t plen,
@@ -38,45 +50,11 @@ static void hmac_sha26(const uint8_t *key, size_t key_length,
   mbedtls_md_hmac(md, key, key_length, data, data_length, out_buffer);
 }
 
-static void p256_point_mod_N(const uint8_t *in, size_t in_len, uint8_t *out,
-                             size_t out_len) {
-  mbedtls_ecp_group curve;
-  mbedtls_mpi t;
-  mbedtls_ecp_group_init(&curve);
-  mbedtls_mpi_init(&t);
-  mbedtls_ecp_group_load(&curve, MBEDTLS_ECP_DP_SECP256R1);
-
-  mbedtls_mpi_read_binary(&t, in, in_len);
-  mbedtls_mpi_mod_mpi(&t, &t, &curve.N);
-  mbedtls_mpi_write_binary(&t, out, out_len);
-
-  mbedtls_ecp_group_free(&curve);
-  mbedtls_mpi_free(&t);
-}
-
 static int p256_dmmy_rng(void *c, uint8_t *out, size_t out_len) {
+  for (int i = 0; i < out_len; i++) {
+    out[i] = rand();
+  }
   return 0;  // TODO
-}
-
-static void p256_point_mod_N_mul_G(const uint8_t *win, size_t win_len,
-                                   uint8_t *out, size_t *out_len) {
-  mbedtls_ecp_group curve;
-  mbedtls_mpi w_bn;
-  mbedtls_ecp_point t;
-  mbedtls_ecp_group_init(&curve);
-  mbedtls_mpi_init(&w_bn);
-  mbedtls_ecp_point_init(&t);
-
-  mbedtls_ecp_group_load(&curve, MBEDTLS_ECP_DP_SECP256R1);
-  mbedtls_mpi_read_binary(&w_bn, win, win_len);
-  mbedtls_mpi_mod_mpi(&w_bn, &w_bn, &curve.N);
-  mbedtls_ecp_mul(&curve, &t, &w_bn, &curve.G, p256_dmmy_rng, nullptr);
-
-  mbedtls_ecp_point_write_binary(&curve, &t, MBEDTLS_ECP_PF_UNCOMPRESSED,
-                                 out_len, out, *out_len);
-  mbedtls_ecp_point_free(&t);
-  mbedtls_mpi_free(&w_bn);
-  mbedtls_ecp_group_free(&curve);
 }
 
 const uint8_t spake2p_M[] = {
@@ -96,132 +74,173 @@ const uint8_t spake2p_N[] = {
     0x8c, 0xd5, 0x64, 0x49, 0x0b, 0x1e, 0x65, 0x6e, 0xdb, 0xe7,
 };
 
-static void debug_calc_cb(SHA256 *hash, const uint8_t *ws, const uint8_t *pA,
-                          size_t pA_len, uint8_t *pB, size_t *pBlen,
-                          uint8_t *cB, size_t *cBlen) {
+static void spake2p_round02(SHA256 *hash, const uint8_t *ws, size_t ws_len,
+                            const uint8_t *pA, size_t pA_len, uint8_t *pB,
+                            size_t *pB_len, uint8_t *cB, size_t *cB_len) {
   // xy = random
   // pB = Y = xy*G + w0 * N
 
   mbedtls_ecp_group curve;
   mbedtls_mpi xy;
   mbedtls_mpi w0;
-  mbedtls_mpi w1;
-  mbedtls_mpi t;
   mbedtls_ecp_point pb;
   mbedtls_ecp_point M;
   mbedtls_ecp_point N;
-  mbedtls_ecp_point z;
-  mbedtls_ecp_point v;
-  mbedtls_ecp_point l;
 
   mbedtls_ecp_group_init(&curve);
   mbedtls_mpi_init(&xy);
   mbedtls_mpi_init(&w0);
-  mbedtls_mpi_init(&w1);
-  mbedtls_mpi_init(&t);
   mbedtls_ecp_point_init(&pb);
-  mbedtls_ecp_point_init(&z);
-  mbedtls_ecp_point_init(&v);
-  mbedtls_ecp_point_init(&l);
   mbedtls_ecp_point_init(&M);
   mbedtls_ecp_point_init(&N);
 
-  mbedtls_ecp_gen_privkey(&curve, &xy, p256_dmmy_rng, nullptr);
+  int ret = mbedtls_ecp_group_load(&curve, MBEDTLS_ECP_DP_SECP256R1);
+  if (ret != 0) {
+    return;
+  }
+  ret = mbedtls_ecp_gen_privkey(&curve, &xy, p256_dmmy_rng, nullptr);
+  if (ret != 0) {
+    return;
+  }
 
-  mbedtls_ecp_point_read_binary(&curve, &M, spake2p_M, sizeof(spake2p_M));
-  mbedtls_ecp_point_read_binary(&curve, &M, spake2p_N, sizeof(spake2p_N));
+  /*
+    {  // DBG
+      const uint8_t sx[] = {0x2e, 0x08, 0x95, 0xb0, 0xe7, 0x63, 0xd6, 0xd5,
+                            0xa9, 0x56, 0x44, 0x33, 0xe6, 0x4a, 0xc3, 0xca,
+                            0xc7, 0x4f, 0xf8, 0x97, 0xf6, 0xc3, 0x44, 0x52,
+                            0x47, 0xba, 0x1b, 0xab, 0x40, 0x08, 0x2a, 0x91};
+      ret = mbedtls_mpi_read_binary(&xy, sx, sizeof(sx));
+      if (ret != 0) {
+        return;
+      }
+    }
+  */
+
+  ret = mbedtls_ecp_point_read_binary(&curve, &M, spake2p_M, sizeof(spake2p_M));
+  if (ret != 0) {
+    return;
+  }
+  ret = mbedtls_ecp_point_read_binary(&curve, &N, spake2p_N, sizeof(spake2p_N));
+  if (ret != 0) {
+    return;
+  }
 
   // w0
-  mbedtls_mpi_read_binary(&w0, ws, 40);
-  mbedtls_mpi_mod_mpi(&w0, &w0, &curve.N);
+  ret = mbedtls_mpi_read_binary(&w0, ws, ws_len / 2);
+  if (ret != 0) {
+    return;
+  }
+  ret = mbedtls_mpi_mod_mpi(&w0, &w0, &curve.N);
+  if (ret != 0) {
+    return;
+  }
 
+  // dump("xy", (uint8_t *)xy.p, xy.n * 4);
+  // dump("w0", (uint8_t *)w0.p, w0.n * 4);
   // pB
-  mbedtls_ecp_muladd(&curve, &pb, &xy, &curve.G, &w0, &N);
-  mbedtls_mpi_sub_mpi(&pb.Y, &curve.P, &pb.Y);  // inv
+  ret = mbedtls_ecp_muladd(&curve, &pb, &xy, &curve.G, &w0, &N);
+  if (ret != 0) {
+    return;
+  }
   mbedtls_ecp_point_write_binary(&curve, &pb, MBEDTLS_ECP_PF_UNCOMPRESSED,
-                                 pBlen, pB, 65);
+                                 pB_len, pB, *pB_len);
 
-  dump("pb", pB, *pBlen);
+  dump("pA", pA, pA_len);
+  dump("pB", pB, *pB_len);
+
+  // TT
+  uint8_t buf[80];
+  uint32_t sz = 0;
+
+  mbedtls_ecp_point_write_binary(&curve, &M, MBEDTLS_ECP_PF_UNCOMPRESSED,
+                                 (size_t *)&sz, buf, sizeof(buf));
+  hash->updateBlock(buf, sz);
+
+  mbedtls_ecp_point_write_binary(&curve, &N, MBEDTLS_ECP_PF_UNCOMPRESSED,
+                                 (size_t *)&sz, buf, sizeof(buf));
+  hash->updateBlock(buf, sz);
+
+  sz = pA_len;
+  hash->updateBlock(pA, pA_len);
+  sz = *pB_len;
+  hash->updateBlock(pB, *pB_len);
 
   // Z = cmul(xy*X + xy*w0*inv(MN))
   // V = cmul(xy * L)
 
-  // Z
-  mbedtls_ecp_point x;
-  mbedtls_ecp_point m;
-  mbedtls_ecp_point_init(&x);
-  mbedtls_ecp_point_init(&m);
+  mbedtls_ecp_point z;
+  mbedtls_ecp_point v;
+  mbedtls_ecp_point l;
+  mbedtls_ecp_point_init(&l);
+  mbedtls_ecp_point_init(&z);
+  mbedtls_ecp_point_init(&v);
+  mbedtls_mpi w1;
+  mbedtls_mpi_init(&w1);
 
-  mbedtls_mpi_sub_mpi(&M.Y, &curve.P, &M.Y);  // inv TODO:copy
-  mbedtls_ecp_point_read_binary(&curve, &x, pA, 65);
-  mbedtls_mpi_mul_mpi(&t, &xy, &w0);
-  mbedtls_ecp_muladd(&curve, &z, &xy, &x, &t, &m);
+  // Z = *xy*(X - w0*M) => xy*X + xy*w0*(-M)
+  mbedtls_ecp_point x;
+  mbedtls_mpi t;
+  mbedtls_ecp_point_init(&x);
+  mbedtls_mpi_init(&t);
+
+  ret = mbedtls_mpi_sub_mpi(&M.Y, &curve.P, &M.Y);  // inv TODO:copy
+  if (ret != 0) {
+    return;
+  }
+  ret = mbedtls_ecp_point_read_binary(&curve, &x, pA, pA_len);
+  if (ret != 0) {
+    return;
+  }
+  ret = mbedtls_mpi_mul_mpi(&t, &xy, &w0);
+  if (ret != 0) {
+    return;
+  }
+  mbedtls_mpi_mod_mpi(&t, &t, &curve.N);
+  ret = mbedtls_ecp_muladd(&curve, &z, &xy, &x, &t, &M);
+  if (ret != 0) {
+    return;
+  }
 
   // L = (w1 mod N) * G
   // V = xy * L
-  mbedtls_mpi_read_binary(&w1, ws + 40, 40);
+  mbedtls_mpi_read_binary(&w1, ws + ws_len / 2, ws_len / 2);
   mbedtls_mpi_mod_mpi(&w1, &w1, &curve.N);
   mbedtls_ecp_mul(&curve, &l, &w1, &curve.G, p256_dmmy_rng, nullptr);
   mbedtls_ecp_mul(&curve, &v, &xy, &l, p256_dmmy_rng, nullptr);
 
-  // TT
-  uint8_t buf[80];
-
-  uint64_t sz = 0;
-  hash->update((uint8_t *)&sz, 8);
-  hash->update((uint8_t *)&sz, 8);
-
-  mbedtls_ecp_point_write_binary(&curve, &M, MBEDTLS_ECP_PF_UNCOMPRESSED,
-                                 (size_t *)&sz, buf, sizeof(buf));
-  hash->update((uint8_t *)&sz, 8);
-  hash->update(buf, sz);
-
-  mbedtls_ecp_point_write_binary(&curve, &N, MBEDTLS_ECP_PF_UNCOMPRESSED,
-                                 (size_t *)&sz, buf, sizeof(buf));
-  hash->update((uint8_t *)&sz, 8);
-  hash->update(buf, sz);
-
-  sz = pA_len;
-  hash->update((uint8_t *)&sz, 8);
-  hash->update(pA, pA_len);
-  sz = *pBlen;
-  hash->update((uint8_t *)&sz, 8);
-  hash->update(pB, *pBlen);
-
   mbedtls_ecp_point_write_binary(&curve, &z, MBEDTLS_ECP_PF_UNCOMPRESSED,
                                  (size_t *)&sz, buf, sizeof(buf));
-  hash->update((uint8_t *)&sz, 8);
-  hash->update(buf, sz);
+  hash->updateBlock(buf, sz);
+  dump("Z", buf, sz);
 
   mbedtls_ecp_point_write_binary(&curve, &v, MBEDTLS_ECP_PF_UNCOMPRESSED,
                                  (size_t *)&sz, buf, sizeof(buf));
-  hash->update((uint8_t *)&sz, 8);
-  hash->update(buf, sz);
+  hash->updateBlock(buf, sz);
+  dump("V", buf, sz);
 
-  sz = 40;
-  mbedtls_mpi_write_binary(&w0, buf, 40);
-  hash->update((uint8_t *)&sz, 8);
-  hash->update(buf, sz);
+  mbedtls_mpi_write_binary(&w0, buf, 32); // ws_len / 2
+
+  hash->updateBlock(buf, 32);
+  dump("w0", buf, 32);
   hash->finish(buf);
 
-  dump("TT hash:", buf, 32);
-
+  dump("TT hash", buf, 32);
   // kca|kcb = HKDF_SHA256( tthash.fistharf , info = "ConfirmationKeys")
   // cB = HMAC(Kcb, pa = X)
   const char *info = "ConfirmationKeys";
-  uint8_t buf2[32];
+  uint8_t buf2[32];  // draft01
   mbedtls_hkdf(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), nullptr, 0, buf,
-               16, (const uint8_t *)info, strlen(info) - 1, buf2, 32);
+               16, (const uint8_t *)info, strlen(info), buf2, sizeof(buf2));
+  dump("K_confirm", buf2, sizeof(buf2));
 
-  *cBlen = 32;
-  hmac_sha26(buf2 + 16, 16, pA, pA_len, cB);
+  *cB_len = 32;
+  hmac_sha26(buf2 + sizeof(buf2) / 2, sizeof(buf2) / 2, pA, pA_len, cB);
 
-  dump("cB:", cB, *cBlen);
+  dump("cB", cB, *cB_len);
 
   mbedtls_ecp_group_free(&curve);
 
   mbedtls_ecp_point_free(&x);
-  mbedtls_ecp_point_free(&m);
 
   mbedtls_mpi_free(&xy);
   mbedtls_mpi_free(&w0);
