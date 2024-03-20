@@ -142,6 +142,23 @@ static int message_write_pheader(uint8_t *buf, uint8_t op, uint16_t ex,
   return sz;
 }
 
+#define MSG_STATUS_REPORT_SUCCESS 0x00
+#define MSG_STATUS_REPORT_FAILURE 0x01
+#define MSG_STATUS_REPORT_SESSION_ESTABLISHMENT_SUCCESS 0x0000
+
+static int write_status_report(uint8_t *buf, uint16_t generic_code,
+                                       uint16_t status) {
+  buf[0] = generic_code;
+  buf[1] = generic_code >> 8;
+  buf[2] = MSG_PROTO_ID_SECURE;
+  buf[3] = MSG_PROTO_ID_SECURE >> 8;
+  buf[4] = MSG_PROTO_ID_SECURE >> 16;
+  buf[5] = MSG_PROTO_ID_SECURE >> 24;
+  buf[6] = status;
+  buf[7] = status >> 8;
+  return 8;
+}
+
 #define TLV_TAG_TYPE_MASK 0xe0
 #define TLV_TAG_TYPE_ANONYMOUS (0 << 5)
 #define TLV_TAG_TYPE_CONTEXT_1 (1 << 5)

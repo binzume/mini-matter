@@ -18,8 +18,8 @@ struct SHA256 {
     uint8_t dummy[4] = {0};
     mbedtls_sha256_update(&ctx, (uint8_t *)&len, 4);  // todo byte order
     mbedtls_sha256_update(&ctx, dummy, 4);
-    // dump("TT block", (uint8_t *)&len, 4);
-    // dump("TT block", buf, len);
+    // debug_dump("TT block", (uint8_t *)&len, 4);
+    // debug_dump("TT block", buf, len);
     if (len > 0) {
       mbedtls_sha256_update(&ctx, buf, len);
     }
@@ -76,7 +76,7 @@ const uint8_t spake2p_N[] = {
 
 static void spake2p_round02(SHA256 *hash, const uint8_t *ws, size_t ws_len,
                             const uint8_t *pA, size_t pA_len, uint8_t *pB,
-                            size_t *pB_len, uint8_t *cB, size_t *cB_len) {
+                            size_t *pB_len, uint8_t *out, size_t out_len) {
   // xy = random
   // pB = Y = xy*G + w0 * N
 
@@ -135,8 +135,6 @@ static void spake2p_round02(SHA256 *hash, const uint8_t *ws, size_t ws_len,
     return;
   }
 
-  // dump("xy", (uint8_t *)xy.p, xy.n * 4);
-  // dump("w0", (uint8_t *)w0.p, w0.n * 4);
   // pB
   ret = mbedtls_ecp_muladd(&curve, &pb, &xy, &curve.G, &w0, &N);
   if (ret != 0) {
@@ -145,8 +143,8 @@ static void spake2p_round02(SHA256 *hash, const uint8_t *ws, size_t ws_len,
   mbedtls_ecp_point_write_binary(&curve, &pb, MBEDTLS_ECP_PF_UNCOMPRESSED,
                                  pB_len, pB, *pB_len);
 
-  dump("pA", pA, pA_len);
-  dump("pB", pB, *pB_len);
+  debug_dump("pA", pA, pA_len);
+  debug_dump("pB", pB, *pB_len);
 
   // TT
   uint8_t buf[80];
@@ -211,32 +209,26 @@ static void spake2p_round02(SHA256 *hash, const uint8_t *ws, size_t ws_len,
   mbedtls_ecp_point_write_binary(&curve, &z, MBEDTLS_ECP_PF_UNCOMPRESSED,
                                  (size_t *)&sz, buf, sizeof(buf));
   hash->updateBlock(buf, sz);
-  dump("Z", buf, sz);
+  debug_dump("Z", buf, sz);
 
   mbedtls_ecp_point_write_binary(&curve, &v, MBEDTLS_ECP_PF_UNCOMPRESSED,
                                  (size_t *)&sz, buf, sizeof(buf));
   hash->updateBlock(buf, sz);
-  dump("V", buf, sz);
+  debug_dump("V", buf, sz);
 
-  mbedtls_mpi_write_binary(&w0, buf, 32); // ws_len / 2
+  mbedtls_mpi_write_binary(&w0, buf, 32);  // ws_len / 2
 
   hash->updateBlock(buf, 32);
-  dump("w0", buf, 32);
+  debug_dump("w0", buf, 32);
   hash->finish(buf);
 
-  dump("TT hash", buf, 32);
+  debug_dump("TT hash", buf, 32);
   // kca|kcb = HKDF_SHA256( tthash.fistharf , info = "ConfirmationKeys")
   // cB = HMAC(Kcb, pa = X)
   const char *info = "ConfirmationKeys";
-  uint8_t buf2[32];  // draft01
   mbedtls_hkdf(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), nullptr, 0, buf,
-               16, (const uint8_t *)info, strlen(info), buf2, sizeof(buf2));
-  dump("K_confirm", buf2, sizeof(buf2));
-
-  *cB_len = 32;
-  hmac_sha26(buf2 + sizeof(buf2) / 2, sizeof(buf2) / 2, pA, pA_len, cB);
-
-  dump("cB", cB, *cB_len);
+               16, (const uint8_t *)info, strlen(info), out, out_len);
+  debug_dump("K_confirm", out, sizeof(out_len));
 
   mbedtls_ecp_group_free(&curve);
 

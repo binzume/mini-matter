@@ -1,74 +1,51 @@
 #include <Arduino.h>
+#include <NimBLEDevice.h>
+#include "matter_pase.h"
+#include "matter_config.h"
 
 #define LOG Serial
 
-void dump(const char* msg, const uint8_t* buf = nullptr, int len = 0) {
-  if (msg) {
-    Serial.print(msg);
-    Serial.print(": ");
-  }
-  for (int i = 0; i < len; i++) {
-    if (buf[i] < 0x10) {
-      Serial.print("0");
-    }
-    Serial.print(buf[i], HEX);
-    if (i != len - 1) {
-      Serial.print(",");
-    }
-  }
-  Serial.println();
-}
-
-#include <NimBLEDevice.h>
-
-#include "matter_pase.h"
-
-static const NimBLEUUID SERVICE_UUID((uint16_t)0xfff6);
-static const NimBLEUUID TX_UUID("18EE2EF5-263D-4559-959F-4F9C429F9D11");
-static const NimBLEUUID RX_UUID("18EE2EF5-263D-4559-959F-4F9C429F9D12");
-// static const NimBLEUUID
-// ADDITIONAL_UUID("64630238-8772-45F2-B87D-748A83218F04");
+static const NimBLEUUID SERVICE_UUID((uint16_t)MATTER_BLE_SERVICE_UUID);
+static const NimBLEUUID TX_UUID(MATTER_BLE_TX_UUID);
+static const NimBLEUUID RX_UUID(MATTER_BLE_RX_UUID);
 
 static NimBLEAdvertising* pAdvertising = nullptr;
 static NimBLECharacteristic* pTXCharacteristic = nullptr;
 static NimBLECharacteristic* pRXCharacteristic = nullptr;
 
-int state = 0;
 uint8_t recvbuf[256];
 uint8_t recvsize = 0;
-uint8_t sendbuf[256];
-uint8_t sendsize = 0;
-PaseContext* pase;
+PaseContext* pase = nullptr;
 
 class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
   void onRead(NimBLECharacteristic* pCharacteristic) {
-    Serial.print(pCharacteristic->getUUID().toString().c_str());
-    Serial.print(": onRead(), value: ");
-    Serial.println(pCharacteristic->getValue().length());
+    LOG.print(pCharacteristic->getUUID().toString().c_str());
+    LOG.print(": onRead(), value: ");
+    LOG.println(pCharacteristic->getValue().length());
   };
 
   void onWrite(NimBLECharacteristic* pCharacteristic) {
     if (pCharacteristic == pTXCharacteristic) {
       auto v = pCharacteristic->getValue();
-      Serial.print("RECV:[");
+      LOG.print("RECV:[");
       for (auto c : v) {
-        Serial.print(",");
-        Serial.print(c, HEX);
+        LOG.print(",");
+        LOG.print(c, HEX);
       }
-      Serial.println("]");
+      LOG.println("]");
       recvsize = v.size();
       memcpy(recvbuf, v.data(), recvsize);
     } else {
-      Serial.print(pCharacteristic->getUUID().toString().c_str());
-      Serial.print(": onWrite(), value: ");
-      Serial.println(pCharacteristic->getValue().length());
+      LOG.print(pCharacteristic->getUUID().toString().c_str());
+      LOG.print(": onWrite(), value: ");
+      LOG.println(pCharacteristic->getValue().length());
     }
   };
   /** Called before notification or indication is sent,
    *  the value can be changed here before sending if desired.
    */
   void onNotify(NimBLECharacteristic* pCharacteristic) {
-    Serial.println("Sending notification to clients");
+    LOG.println("Sending notification to clients");
   };
 
   /** The status returned in status is defined in NimBLECharacteristic.h.
@@ -82,7 +59,7 @@ class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
     str += code;
     str += ", ";
     str += NimBLEUtils::returnCodeToString(code);
-    Serial.println(str);
+    LOG.println(str);
   };
 
   void onSubscribe(NimBLECharacteristic* pCharacteristic,
@@ -101,8 +78,7 @@ class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
       str += " Subscribed to notifications and indications for ";
     }
     str += std::string(pCharacteristic->getUUID()).c_str();
-
-    Serial.println(str);
+    LOG.println(str);
   };
 };
 
@@ -130,20 +106,18 @@ void startAdv() {
 
 void setup() {
   LOG.begin(115200);
-  LOG.println("Starting BLE work!");
-  // testSPAKE2p_draft01();
+  LOG.println("Starting Matter PASE");
 
   NimBLEDevice::init("ESP32");
 
   // Create the BLE Server
   NimBLEServer* pServer = NimBLEDevice::createServer();
-  // pServer->setCallbacks(new MyServerCallbacks());
   pServer->advertiseOnDisconnect(true);
 
   // Create the BLE Service
   NimBLEService* pService = pServer->createService(SERVICE_UUID);
 
-  // Create a BLE Characteristic
+  // Create BLE Characteristics
   pTXCharacteristic =
       pService->createCharacteristic(TX_UUID, NIMBLE_PROPERTY::WRITE);
   pTXCharacteristic->setCallbacks(&chrCallbacks);
@@ -161,27 +135,18 @@ void setup() {
 void loop() {
   if (recvsize > 0) {
     delay(100);
-    if (recvbuf[0] == 0x65) {
-      state = 0;  // start handshake
+    if (pase == nullptr) {
+      pase = pase_init();  // todo delete
     }
-    if (state == 0) {
-      pase = new PaseContext();  // todo delete
-      sendsize = make_handshake_res(pase, recvbuf, recvsize, sendbuf);
-    } else if (state == 1) {
-      sendsize = make_pbdkres(pase, recvbuf, recvsize, sendbuf);
-    } else if (state == 2) {
-      sendsize = make_pake2(pase, recvbuf, recvsize, sendbuf);
-    }
+    uint8_t sendbuf[256];
+    int sendsize = handle_btp_packet(pase, recvbuf, recvsize, sendbuf);
     recvsize = 0;
     if (sendsize > 0) {
-      state++;
       pRXCharacteristic->setValue(sendbuf, sendsize);
       pRXCharacteristic->notify();
       LOG.print("SEND RESPONSE ");
       LOG.print(sendsize);
       LOG.println(" bytes");
-    } else {
-      state = 0;
     }
   }
   delay(1);
