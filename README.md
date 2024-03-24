@@ -1,10 +1,15 @@
-# [WIP] mini-PASE
+# [WIP] Simple Matter implementation for ESP32
 
-MatterデバイスのふりをしてWiFiのSSIDとパスワードを取得するための最小限の実装。
+MatterデバイスのふりをしてWiFiのSSIDとパスワードを取得するための実装。
 
-WIP: まだSPAKE2+の鍵交換の途中までの実装で、WiFiのセットアップまでたどりつきません。
+[esp-matter](https://github.com/espressif/esp-matter) は巨大で、WiFiのセットアップだけに利用するには、メモリとFlashを圧迫するので作りました。
 
-[esp-matter](https://github.com/espressif/esp-matter) は巨大で、WiFiのセットアップだけに利用しても、メモリとFlashを圧迫するので、最低限の実装。
+WIP: まだWiFiのセットアップまでたどりつきません。
+
+Done:
+
+- BTP/Matter TLV/Matter Message
+- SPAKE2+の鍵交換
 
 # License
 

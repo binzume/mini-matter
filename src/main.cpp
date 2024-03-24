@@ -32,6 +32,7 @@ class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
         LOG.print(",");
         LOG.print(c, HEX);
       }
+      while(recvsize > 0);
       LOG.println("]");
       recvsize = v.size();
       memcpy(recvbuf, v.data(), recvsize);
@@ -134,7 +135,7 @@ void setup() {
 
 void loop() {
   if (recvsize > 0) {
-    delay(100);
+    delay(80);
     if (pase == nullptr) {
       pase = pase_init();  // todo delete
     }

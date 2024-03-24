@@ -5,6 +5,7 @@
 #define MATTER_BLE_ADDITIONAL_UUID "64630238-8772-45F2-B87D-748A83218F04"
 
 struct PaseContext *pase_init();
+// void pase_free(struct PaseContext *);
 
 int handle_btp_packet(struct PaseContext *ctx, const uint8_t *req, int reqsize,
                       uint8_t *res);

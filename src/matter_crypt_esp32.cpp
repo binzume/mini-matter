@@ -1,3 +1,6 @@
+#include "matter_crypt_esp32.h"
+
+#include <mbedtls/ccm.h>
 #include <mbedtls/ecdh.h>
 #include <mbedtls/ecdsa.h>
 #include <mbedtls/hkdf.h>
@@ -5,35 +8,10 @@
 #include <mbedtls/pkcs5.h>
 #include <mbedtls/sha256.h>
 
-struct SHA256 {
-  mbedtls_sha256_context ctx;
-  SHA256() {
-    mbedtls_sha256_init(&ctx);
-    mbedtls_sha256_starts(&ctx, 0);
-  }
-  void update(const uint8_t *buf, uint32_t len) {
-    mbedtls_sha256_update(&ctx, buf, len);
-  }
-  void updateBlock(const uint8_t *buf, uint32_t len) {
-    uint8_t dummy[4] = {0};
-    mbedtls_sha256_update(&ctx, (uint8_t *)&len, 4);  // todo byte order
-    mbedtls_sha256_update(&ctx, dummy, 4);
-    // debug_dump("TT block", (uint8_t *)&len, 4);
-    // debug_dump("TT block", buf, len);
-    if (len > 0) {
-      mbedtls_sha256_update(&ctx, buf, len);
-    }
-  }
-  void finish(uint8_t *out) {
-    mbedtls_sha256_finish(&ctx, out);
-    mbedtls_sha256_free(&ctx);
-  }
-};
-
-static void pbkdf2_sha256_hmac(const uint8_t *password, size_t plen,
-                               const uint8_t *salt, size_t salt_len,
-                               unsigned int iteration_count, uint32_t key_len,
-                               uint8_t *out) {
+void pbkdf2_sha256_hmac(const uint8_t *password, size_t plen,
+                        const uint8_t *salt, size_t salt_len,
+                        unsigned int iteration_count, uint32_t key_len,
+                        uint8_t *out) {
   mbedtls_md_context_t md;
   mbedtls_md_init(&md);
   mbedtls_md_setup(&md, mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), 1);
@@ -42,41 +20,50 @@ static void pbkdf2_sha256_hmac(const uint8_t *password, size_t plen,
   mbedtls_md_free(&md);
 }
 
-static void hmac_sha26(const uint8_t *key, size_t key_length,
-                       const uint8_t *data, size_t data_length,
-                       uint8_t *out_buffer) {
+void hmac_sha26(const uint8_t *key, size_t key_length, const uint8_t *data,
+                size_t data_length, uint8_t *out_buffer) {
   const mbedtls_md_info_t *const md =
       mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
   mbedtls_md_hmac(md, key, key_length, data, data_length, out_buffer);
 }
 
-static int p256_dmmy_rng(void *c, uint8_t *out, size_t out_len) {
+int aes_ccm_decrypt(const uint8_t *data, size_t data_len, const uint8_t *aad,
+                    size_t aad_len, const uint8_t *key128, const uint8_t *tag,
+                    size_t tag_len, const uint8_t *nonce, size_t nonce_len,
+                    uint8_t *result) {
+  mbedtls_ccm_context ctx;
+  mbedtls_ccm_init(&ctx);
+  mbedtls_ccm_setkey(&ctx, MBEDTLS_CIPHER_ID_AES, key128, 16 * 8);
+  int ret = mbedtls_ccm_auth_decrypt(&ctx, data_len, nonce, nonce_len, aad,
+                                     aad_len, data, result, tag, tag_len);
+  mbedtls_ccm_free(&ctx);
+  return ret;
+}
+
+int aes_ccm_encrypt(const uint8_t *data, size_t data_len, const uint8_t *aad,
+                    size_t aad_len, const uint8_t *key128, uint8_t *tag,
+                    size_t tag_len, const uint8_t *nonce, size_t nonce_len,
+                    uint8_t *result) {
+  mbedtls_ccm_context ctx;
+  mbedtls_ccm_init(&ctx);
+  mbedtls_ccm_setkey(&ctx, MBEDTLS_CIPHER_ID_AES, key128, 16 * 8);
+  int ret = mbedtls_ccm_encrypt_and_tag(&ctx, data_len, nonce, nonce_len, aad,
+                                        aad_len, data, result, tag, tag_len);
+  mbedtls_ccm_free(&ctx);
+  return ret;
+}
+
+int p256_dmmy_rng(void *c, uint8_t *out, size_t out_len) {
   for (int i = 0; i < out_len; i++) {
     out[i] = rand();
   }
   return 0;  // TODO
 }
 
-const uint8_t spake2p_M[] = {
-    0x04, 0x88, 0x6e, 0x2f, 0x97, 0xac, 0xe4, 0x6e, 0x55, 0xba, 0x9d,
-    0xd7, 0x24, 0x25, 0x79, 0xf2, 0x99, 0x3b, 0x64, 0xe1, 0x6e, 0xf3,
-    0xdc, 0xab, 0x95, 0xaf, 0xd4, 0x97, 0x33, 0x3d, 0x8f, 0xa1, 0x2f,
-    0x5f, 0xf3, 0x55, 0x16, 0x3e, 0x43, 0xce, 0x22, 0x4e, 0x0b, 0x0e,
-    0x65, 0xff, 0x02, 0xac, 0x8e, 0x5c, 0x7b, 0xe0, 0x94, 0x19, 0xc7,
-    0x85, 0xe0, 0xca, 0x54, 0x7d, 0x55, 0xa1, 0x2e, 0x2d, 0x20,
-};
-const uint8_t spake2p_N[] = {
-    0x04, 0xd8, 0xbb, 0xd6, 0xc6, 0x39, 0xc6, 0x29, 0x37, 0xb0, 0x4d,
-    0x99, 0x7f, 0x38, 0xc3, 0x77, 0x07, 0x19, 0xc6, 0x29, 0xd7, 0x01,
-    0x4d, 0x49, 0xa2, 0x4b, 0x4f, 0x98, 0xba, 0xa1, 0x29, 0x2b, 0x49,
-    0x07, 0xd6, 0x0a, 0xa6, 0xbf, 0xad, 0xe4, 0x50, 0x08, 0xa6, 0x36,
-    0x33, 0x7f, 0x51, 0x68, 0xc6, 0x4d, 0x9b, 0xd3, 0x60, 0x34, 0x80,
-    0x8c, 0xd5, 0x64, 0x49, 0x0b, 0x1e, 0x65, 0x6e, 0xdb, 0xe7,
-};
-
-static void spake2p_round02(SHA256 *hash, const uint8_t *ws, size_t ws_len,
-                            const uint8_t *pA, size_t pA_len, uint8_t *pB,
-                            size_t *pB_len, uint8_t *out, size_t out_len) {
+void spake2p_round02(struct SHA256 *hash, const uint8_t *ws, size_t ws_len,
+                     const uint8_t *pA, size_t pA_len, uint8_t *pB,
+                     size_t *pB_len, uint8_t *ckey, size_t ckey_len,
+                     uint8_t *skey, size_t skey_len) {
   // xy = random
   // pB = Y = xy*G + w0 * N
 
@@ -223,13 +210,21 @@ static void spake2p_round02(SHA256 *hash, const uint8_t *ws, size_t ws_len,
   hash->finish(buf);
 
   debug_dump("TT hash", buf, 32);
-  // kca|kcb = HKDF_SHA256( tthash.fistharf , info = "ConfirmationKeys")
-  // cB = HMAC(Kcb, pa = X)
-  const char *info = "ConfirmationKeys";
-  mbedtls_hkdf(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), nullptr, 0, buf,
-               16, (const uint8_t *)info, strlen(info), out, out_len);
-  debug_dump("K_confirm", out, sizeof(out_len));
+  if (ckey_len) {
+    const char *info = "ConfirmationKeys";
+    mbedtls_hkdf(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), nullptr, 0, buf,
+                 16, (const uint8_t *)info, strlen(info), ckey, ckey_len);
+    debug_dump("K_confirm", ckey, ckey_len);
+  }
+  if (skey_len) {
+    const char *info = "SessionKeys";
+    mbedtls_hkdf(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), nullptr, 0,
+                 buf + 16, 16, (const uint8_t *)info, strlen(info), skey,
+                 skey_len);
+    debug_dump("keys", skey, skey_len);
+  }
 
+  // TODO: free when error case
   mbedtls_ecp_group_free(&curve);
 
   mbedtls_ecp_point_free(&x);

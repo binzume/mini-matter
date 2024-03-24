@@ -20,6 +20,10 @@ static int btp_get_header_size(const uint8_t *buf) {
   return sz;
 }
 
+static uint8_t btp_get_seq(const uint8_t *buf) {
+  return buf[(buf[0] & BTP_A_MASK) ? 2 : 1];
+}
+
 static int btp_write_header(uint8_t *buf, uint8_t ack, uint8_t seq,
                             uint16_t size) {
   buf[0] = BTP_A_MASK | BTP_E_MASK | BTP_B_MASK;
@@ -53,6 +57,15 @@ static void btp_update_size(uint8_t *buf, uint16_t size) {
 #define MSG_PROTO_OP_PASE_PAKE2 0x23
 #define MSG_PROTO_OP_PASE_PAKE3 0x24
 #define MSG_PROTO_OP_STATUS_REPORT 0x40
+
+#define MSG_PROTO_ID_INTERACTION_MODEL 0x0001
+#define MSG_PROTO_OP_INTERACTION_STATUS 0x01
+#define MSG_PROTO_OP_INTERACTION_READ 0x02
+#define MSG_PROTO_OP_INTERACTION_DATA 0x05
+#define MSG_PROTO_OP_INTERACTION_WRITE 0x06
+#define MSG_PROTO_OP_INTERACTION_WRITE_RES 0x07
+#define MSG_PROTO_OP_INTERACTION_INVOKE 0x08
+#define MSG_PROTO_OP_INTERACTION_INVOKE_RES 0x09
 
 static int message_get_header_size(const uint8_t *buf) {
   int sz = 8;
@@ -97,7 +110,7 @@ static int message_write_header(uint8_t *buf, uint16_t session,
   buf[0] = dst64 ? MSG_FLAG_DSIZ_64 : 0;  // MSG_FLAG_S;
   buf[1] = session;
   buf[2] = session >> 8;
-  buf[3] = 0;
+  buf[3] = 0;  // security
   buf[4] = msgcount;
   buf[5] = msgcount >> 8;
   buf[6] = msgcount >> 16;
@@ -121,6 +134,10 @@ static uint8_t message_get_proto_op(const uint8_t *buf) { return buf[1]; }
 
 static uint16_t message_get_proto_echange_id(const uint8_t *buf) {
   return buf[2] | buf[3] << 8;
+}
+
+static uint16_t message_get_proto_id(const uint8_t *buf) {
+  return buf[4] | buf[5] << 8;
 }
 
 static int message_write_pheader(uint8_t *buf, uint8_t op, uint16_t ex,
@@ -147,7 +164,7 @@ static int message_write_pheader(uint8_t *buf, uint8_t op, uint16_t ex,
 #define MSG_STATUS_REPORT_SESSION_ESTABLISHMENT_SUCCESS 0x0000
 
 static int write_status_report(uint8_t *buf, uint16_t generic_code,
-                                       uint16_t status) {
+                               uint16_t status) {
   buf[0] = generic_code;
   buf[1] = generic_code >> 8;
   buf[2] = MSG_PROTO_ID_SECURE;
