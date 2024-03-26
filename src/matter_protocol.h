@@ -4,20 +4,26 @@
 #define BTP_M_MASK 0x20
 #define BTP_A_MASK 0x08
 #define BTP_E_MASK 0x04
+#define BTP_C_FLAG 0x02
 #define BTP_B_MASK 0x01
+#define BTP_MAX_HEADER_SIZE 5
 
-static int btp_get_header_size(const uint8_t *buf) {
+static int btp_get_header_size(const uint8_t flags) {
   int sz = 1;
-  if (buf[0] & BTP_A_MASK) {
+  if (flags & BTP_A_MASK) {
     sz++;
   }
-  if ((buf[0] & BTP_H_MASK) == 0) {
+  if ((flags & BTP_H_MASK) == 0) {
     sz++;
   }
-  if (buf[0] & BTP_B_MASK) {
+  if (flags & BTP_B_MASK) {
     sz += 2;
   }
   return sz;
+}
+
+static int btp_get_header_size(const uint8_t *buf) {
+  return btp_get_header_size(buf[0]);
 }
 
 static uint8_t btp_get_seq(const uint8_t *buf) {
@@ -32,6 +38,26 @@ static int btp_write_header(uint8_t *buf, uint8_t ack, uint8_t seq,
   buf[3] = size & 0xff;
   buf[4] = size >> 8;
   return 5;
+}
+
+static int btp_write_header_f(uint8_t *buf, uint8_t flags, uint8_t ack,
+                              uint8_t seq, uint16_t size) {
+  buf[0] = flags;
+  int sz = 1;
+  if (flags & BTP_A_MASK) {
+    buf[sz] = ack;
+    sz++;
+  }
+  if ((flags & BTP_H_MASK) == 0) {
+    buf[sz] = seq;
+    sz++;
+  }
+  if (flags & BTP_B_MASK) {
+    buf[sz] = size;
+    buf[sz + 1] = size >> 8;
+    sz += 2;
+  }
+  return sz;
 }
 
 static void btp_update_size(uint8_t *buf, uint16_t size) {
@@ -66,6 +92,15 @@ static void btp_update_size(uint8_t *buf, uint16_t size) {
 #define MSG_PROTO_OP_INTERACTION_WRITE_RES 0x07
 #define MSG_PROTO_OP_INTERACTION_INVOKE 0x08
 #define MSG_PROTO_OP_INTERACTION_INVOKE_RES 0x09
+#define MSG_PROTO_OP_INTERACTION_TIMED 0x0A
+
+#define INTERACTION_STATUS_SUCCESS 0x00
+#define INTERACTION_STATUS_FAILURE 0x01
+#define INTERACTION_STATUS_UNSUPPORTED_COMMAND 0x81
+#define INTERACTION_STATUS_INVALID_COMMAND 0x85
+#define INTERACTION_STATUS_UNSUPPORTED_ATTRIBUTE 0x86
+#define INTERACTION_STATUS_UNSUPPORTED_WRITE 0x88
+
 
 static int message_get_header_size(const uint8_t *buf) {
   int sz = 8;
@@ -313,10 +348,15 @@ static int tlv_write_null(uint8_t *buf, uint8_t tag_type, uint16_t tag) {
 
 static int tlv_write_str(uint8_t *buf, uint8_t tag_type, uint16_t tag,
                          const uint8_t *v, int len) {
-  buf[0] = tag_type << 5 | TLV_VAL_TYPE_STRING_1;
+  buf[0] = tag_type << 5 |
+           (len > 25 ? TLV_VAL_TYPE_STRING_2 : TLV_VAL_TYPE_STRING_1);
   int sz = 1 + write_tag(&buf[1], tag_type, tag);
   buf[sz] = len;
   sz++;
+  if (len > 25) {
+    buf[sz] = len >> 8;
+    sz++;
+  }
   for (int i = 0; i < len; i++) {
     buf[sz] = v[i];
     sz++;

@@ -53,6 +53,10 @@ int aes_ccm_encrypt(const uint8_t *data, size_t data_len, const uint8_t *aad,
   return ret;
 }
 
+void ecdsa_sign(const uint8_t *msg, size_t msg_len, uint8_t *sign, const uint8_t *pkey) {
+  // TODO
+}
+
 int p256_dmmy_rng(void *c, uint8_t *out, size_t out_len) {
   for (int i = 0; i < out_len; i++) {
     out[i] = rand();

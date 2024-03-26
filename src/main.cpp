@@ -1,7 +1,8 @@
 #include <Arduino.h>
 #include <NimBLEDevice.h>
-#include "matter_pase.h"
+
 #include "matter_config.h"
+#include "matter_pase.h"
 
 #define LOG Serial
 
@@ -32,7 +33,8 @@ class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
         LOG.print(",");
         LOG.print(c, HEX);
       }
-      while(recvsize > 0);
+      while (recvsize > 0)
+        ;
       LOG.println("]");
       recvsize = v.size();
       memcpy(recvbuf, v.data(), recvsize);
@@ -147,6 +149,17 @@ void loop() {
       pRXCharacteristic->notify();
       LOG.print("SEND RESPONSE ");
       LOG.print(sendsize);
+      LOG.println(" bytes");
+    }
+  }
+  if (pase != nullptr) {
+    uint8_t* data;
+    uint16_t size = check_btp_packet_send(pase, &data);
+    if (size > 0) {
+      pRXCharacteristic->setValue(data, size);
+      pRXCharacteristic->notify();
+      LOG.print("SEND RESPONSE2 ");
+      LOG.print(size);
       LOG.println(" bytes");
     }
   }
