@@ -335,7 +335,6 @@ int handle_write_report(PaseContext *ctx, const uint8_t *req, int reqsize,
 
 int handle_invoke_command(PaseContext *ctx, const uint8_t *req, int reqsize,
                           uint8_t *res) {
-  // CertificateChainRequest
   uint8_t endpoint = 0x00;
   uint8_t cluster = 0;
   uint8_t command = 0;
@@ -376,34 +375,41 @@ int handle_invoke_command(PaseContext *ctx, const uint8_t *req, int reqsize,
 
           // CommandFields
           if (cluster == 0x3e && command == 0x02) {
+            // CertificateChainRequest
             l += tlv_write_struct(res + l, 1, 1);
             l += tlv_write_str(res + l, 1, 0, kDACert, sizeof(kDACert));
             l += tlv_write_eos(res + l);
           } else if (cluster == 0x3e && command == 0x00) {
             // AttestationRequest
-            // TODO
-            uint8_t damsg[600], sign[64];
+            uint8_t damsg[600], digest[32], sign[64];
             int p = tlv_write_struct(damsg, 0, 0);
-            p += tlv_write_str(damsg + p, 1, 1, kDACert, sizeof(kDACert));
+            p += tlv_write_str(damsg + p, 1, 1, kCd, sizeof(kCd));
             p += tlv_write_str(damsg + p, 1, 2, req + 25, 32);  // nonce
             p += tlv_write(damsg + p, 1, 3, 1234567890);
             p += tlv_write_eos(damsg + p);
-            memcpy(damsg + p, ctx->keys + 32, 16);  // challenge
-            ecdsa_sign(damsg, p + 16, sign, kDACPrivateKey);
+            SHA256 sha256;
+            sha256.update(damsg, p);
+            sha256.update(ctx->keys + 32, 16);
+            sha256.finish(digest);
+            ecdsa_sign(digest, sizeof(digest), sign, kDACPrivateKey);
             l += tlv_write_struct(res + l, 1, 1);
             l += tlv_write_str(res + l, 1, 0, damsg, p);
             l += tlv_write_str(res + l, 1, 1, sign, sizeof(sign));
             l += tlv_write_eos(res + l);
           } else if (cluster == 0x3e && command == 0x04) {
             // CSRRequest
-            // TODO
-            uint8_t damsg[600], sign[64];
+            uint8_t damsg[600], digest[32], sign[64], csr[256];
+            size_t csr_size = sizeof(csr);
+            create_csr(kDACPrivateKey, kDACPublicKey, csr, &csr_size);
             int p = tlv_write_struct(damsg, 0, 0);
-            p += tlv_write_str(damsg + p, 1, 1, kDACert, sizeof(kDACert));
+            p += tlv_write_str(damsg + p, 1, 1, csr, csr_size);
             p += tlv_write_str(damsg + p, 1, 2, req + 25, 32);  // nonce
             p += tlv_write_eos(damsg + p);
-            memcpy(damsg + p, ctx->keys + 32, 16);  // challenge
-            ecdsa_sign(damsg, p + 16, sign, kDACPrivateKey);
+            SHA256 sha256;
+            sha256.update(damsg, p);
+            sha256.update(ctx->keys + 32, 16);
+            sha256.finish(digest);
+            ecdsa_sign(digest, sizeof(digest), sign, kDACPrivateKey);
             l += tlv_write_struct(res + l, 1, 1);
             l += tlv_write_str(res + l, 1, 0, damsg, p);
             l += tlv_write_str(res + l, 1, 1, sign, sizeof(sign));
@@ -447,8 +453,8 @@ int handle_invoke_command(PaseContext *ctx, const uint8_t *req, int reqsize,
       }
       l += tlv_write_eos(res + l);  // End InvokeResponseIB
     }
-    l += tlv_write_eos(res + l);          // End InvokeResponses
-    l += tlv_write(res + l, 1, 255, 10);  // InteractionModelRevision
+    l += tlv_write_eos(res + l);  // End InvokeResponses
+    // l += tlv_write(res + l, 1, 255, 10);  // InteractionModelRevision
   }
   l += tlv_write_eos(res + l);
   debug_dump("INVOKE RES", res, l);

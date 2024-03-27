@@ -349,11 +349,11 @@ static int tlv_write_null(uint8_t *buf, uint8_t tag_type, uint16_t tag) {
 static int tlv_write_str(uint8_t *buf, uint8_t tag_type, uint16_t tag,
                          const uint8_t *v, int len) {
   buf[0] = tag_type << 5 |
-           (len > 25 ? TLV_VAL_TYPE_STRING_2 : TLV_VAL_TYPE_STRING_1);
+           (len > 255 ? TLV_VAL_TYPE_STRING_2 : TLV_VAL_TYPE_STRING_1);
   int sz = 1 + write_tag(&buf[1], tag_type, tag);
   buf[sz] = len;
   sz++;
-  if (len > 25) {
+  if (len > 255) {
     buf[sz] = len >> 8;
     sz++;
   }

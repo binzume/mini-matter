@@ -62,10 +62,13 @@ int aes_ccm_decrypt(const uint8_t *data, size_t data_len, const uint8_t *aad,
                     size_t tag_len, const uint8_t *nonce, size_t nonce_len,
                     uint8_t *result);
 
+void ecdsa_sign(const uint8_t *msg, size_t msg_len, uint8_t *sign,
+                const uint8_t *pkey);
+
+void create_csr(const uint8_t *privkey, const uint8_t *pubkey, uint8_t *csr,
+                size_t *csr_len);
+
 void spake2p_round02(struct SHA256 *hash, const uint8_t *ws, size_t ws_len,
                      const uint8_t *pA, size_t pA_len, uint8_t *pB,
                      size_t *pB_len, uint8_t *ckey, size_t ckey_len,
                      uint8_t *skey, size_t skey_len);
-
-void ecdsa_sign(const uint8_t *msg, size_t msg_len, uint8_t *sign,
-                const uint8_t *pkey);

@@ -7,6 +7,7 @@
 #include <mbedtls/md.h>
 #include <mbedtls/pkcs5.h>
 #include <mbedtls/sha256.h>
+#include <mbedtls/x509_csr.h>
 
 void pbkdf2_sha256_hmac(const uint8_t *password, size_t plen,
                         const uint8_t *salt, size_t salt_len,
@@ -53,16 +54,76 @@ int aes_ccm_encrypt(const uint8_t *data, size_t data_len, const uint8_t *aad,
   return ret;
 }
 
-void ecdsa_sign(const uint8_t *msg, size_t msg_len, uint8_t *sign, const uint8_t *pkey) {
-  // TODO
-}
-
 int p256_dmmy_rng(void *c, uint8_t *out, size_t out_len) {
   for (int i = 0; i < out_len; i++) {
     out[i] = rand();
   }
   return 0;  // TODO
 }
+
+void ecdsa_sign(const uint8_t *msg, size_t msg_len, uint8_t *sign,
+                const uint8_t *privkey) {
+  mbedtls_ecp_keypair keypair;
+  mbedtls_ecp_keypair_init(&keypair);
+  mbedtls_ecp_group_load(&keypair.grp, MBEDTLS_ECP_DP_SECP256R1);
+  mbedtls_mpi_read_binary(&keypair.d, privkey, 32);
+
+  mbedtls_mpi r, s;
+  mbedtls_mpi_init(&r);
+  mbedtls_mpi_init(&s);
+
+  mbedtls_ecdsa_sign(&keypair.grp, &r, &s, &keypair.d, msg, msg_len,
+                     p256_dmmy_rng, nullptr);
+
+  mbedtls_mpi_write_binary(&r, sign, 32);
+  mbedtls_mpi_write_binary(&s, sign + 32, 32);
+
+  mbedtls_mpi_free(&r);
+  mbedtls_mpi_free(&s);
+  mbedtls_ecp_keypair_free(&keypair);
+}
+
+void create_csr(const uint8_t *privkey, const uint8_t *pubkey, uint8_t *out_csr,
+                size_t *csr_len) {
+  mbedtls_ecp_keypair keypair;
+  mbedtls_ecp_keypair_init(&keypair);
+  mbedtls_ecp_group_load(&keypair.grp, MBEDTLS_ECP_DP_SECP256R1);
+  mbedtls_mpi_read_binary(&keypair.d, privkey, 32);
+  mbedtls_ecp_point_read_binary(&keypair.grp, &keypair.Q, pubkey, 65);
+
+  mbedtls_x509write_csr csr;
+  mbedtls_x509write_csr_init(&csr);
+
+  mbedtls_pk_context pk;
+  pk.pk_info = mbedtls_pk_info_from_type(MBEDTLS_PK_ECKEY);
+  pk.pk_ctx = &keypair;
+
+  mbedtls_x509write_csr_set_key(&csr, &pk);
+  mbedtls_x509write_csr_set_md_alg(&csr, MBEDTLS_MD_SHA256);
+  mbedtls_x509write_csr_set_subject_name(&csr, "O=CSR");
+
+  int sz = mbedtls_x509write_csr_der(&csr, out_csr, *csr_len, p256_dmmy_rng,
+                                     nullptr);
+
+  if (*csr_len != sz) {
+    size_t offset = *csr_len - sz;
+    memmove(out_csr, &out_csr[offset], sz);
+  }
+  *csr_len = sz;
+
+  mbedtls_x509write_csr_free(&csr);
+  mbedtls_ecp_keypair_free(&keypair);
+}
+
+#ifndef CONFIG_MBEDTLS_HKDF_C
+// TODO: do not require CONFIG_MBEDTLS_HKDF_C flag to avoid recompile sdk.
+int mbedtls_hkdf(const mbedtls_md_info_t *md, const unsigned char *salt,
+                 size_t salt_len, const unsigned char *ikm, size_t ikm_len,
+                 const unsigned char *info, size_t info_len, unsigned char *okm,
+                 size_t okm_len) {
+  return 0;
+}
+#endif
 
 void spake2p_round02(struct SHA256 *hash, const uint8_t *ws, size_t ws_len,
                      const uint8_t *pA, size_t pA_len, uint8_t *pB,
