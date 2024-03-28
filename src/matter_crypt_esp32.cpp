@@ -116,11 +116,26 @@ void create_csr(const uint8_t *privkey, const uint8_t *pubkey, uint8_t *out_csr,
 }
 
 #ifndef CONFIG_MBEDTLS_HKDF_C
-// TODO: do not require CONFIG_MBEDTLS_HKDF_C flag to avoid recompile sdk.
-int mbedtls_hkdf(const mbedtls_md_info_t *md, const unsigned char *salt,
-                 size_t salt_len, const unsigned char *ikm, size_t ikm_len,
-                 const unsigned char *info, size_t info_len, unsigned char *okm,
-                 size_t okm_len) {
+// do not require CONFIG_MBEDTLS_HKDF_C flag to avoid recompile sdk.
+int mbedtls_hkdf2(const mbedtls_md_info_t *md, const unsigned char *salt,
+                  size_t salt_len, const unsigned char *ikm, size_t ikm_len,
+                  const unsigned char *info, size_t info_len,
+                  unsigned char *okm, size_t okm_len) {
+  const int hashLen = 32;  // sha256
+  if (mbedtls_md_get_size(md) != hashLen || okm_len > 256) {
+    return 1;
+  }
+  uint8_t prk[hashLen], buf[256], t[256], info_pos = 0;
+  mbedtls_md_hmac(md, salt, salt_len, ikm, ikm_len, prk);
+  for (int i = 0; i * hashLen < okm_len; i++) {
+    memcpy(t + info_pos, info, info_len);
+    t[info_pos + info_len] = i + 1;
+    memcpy(t, info, info_len);
+    mbedtls_md_hmac(md, prk, hashLen, t, info_pos + info_len + 1, t);
+    memcpy(buf + i * hashLen, t, hashLen);
+    info_pos = hashLen;
+  }
+  memcpy(okm, buf, okm_len);
   return 0;
 }
 #endif

@@ -7,6 +7,5 @@
 struct PaseContext *pase_init();
 // void pase_free(struct PaseContext *);
 
-int handle_btp_packet(struct PaseContext *ctx, const uint8_t *req, int reqsize,
-                      uint8_t *res);
+int handle_btp_packet(struct PaseContext *ctx, const uint8_t *req, int reqsize);
 uint16_t check_btp_packet_send(PaseContext *ctx, uint8_t **data);

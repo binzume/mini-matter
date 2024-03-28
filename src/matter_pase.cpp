@@ -6,34 +6,36 @@
 
 #define TT_CONTEXT_INIT "CHIP PAKE V1 Commissioning"
 
+// TODO: more secure random
 #define RANDOM ((uint8_t *)"0123456789abcdefghijklmnopqrstuv")
-// #define SALT ((uint8_t *)"0123456789abcdef")
-const uint8_t SALT[16] = {0x53, 0x50, 0x41, 0x4B, 0x45, 0x32, 0x50, 0x20,
-                          0x4B, 0x65, 0x79, 0x20, 0x53, 0x61, 0x6C, 0x74};
+#define SALT ((uint8_t *)"0123456789abcdef")
 #define HMAC_ITER 1000
 
 struct PaseContext {
-  uint8_t send_buf[800];
+  uint8_t recv_buf[1024];
+  uint8_t send_buf[1024];
+  uint16_t recv_size;
   uint16_t send_size;
   uint16_t send_pos;
-  SHA256 contextHash;
-  uint8_t keys[48];     // I2R, R2I, Challenge
-  uint16_t session_id;  // initiator secure session id
-  int count;
-  uint8_t btp_count;
+  uint8_t keys[48];  // I2R[16] + R2I[16] + Challenge[16]
+  uint8_t btp_tx_seq;
   uint8_t btp_rx_seq;
+  uint16_t session_id;  // initiator secure session id
+  uint32_t msg_count;
+  SHA256 contextHash;
 };
 
 PaseContext *pase_init() {
   PaseContext *ctx = new PaseContext();
-  ctx->count = 0;
-  ctx->btp_count = 0;
+  ctx->recv_size = 0;
   ctx->send_size = 0;
   ctx->send_pos = 0;
+  ctx->msg_count = 0;
+  ctx->btp_tx_seq = 0;
   return ctx;
 }
 
-int handle_btp_handshake(PaseContext *ctx, const uint8_t *req, int reqsize,
+int handle_btp_handshake(PaseContext *ctx, const uint8_t *req, size_t reqsize,
                          uint8_t *res) {
   res[0] = 0b1100101;
   res[1] = 0x6C;
@@ -44,7 +46,7 @@ int handle_btp_handshake(PaseContext *ctx, const uint8_t *req, int reqsize,
   return 6;
 }
 
-int handle_pbdkreq(PaseContext *ctx, const uint8_t *req, int reqsize,
+int handle_pbdkreq(PaseContext *ctx, const uint8_t *req, size_t reqsize,
                    uint8_t *res) {
   const uint8_t *initiatorRandom = nullptr;
 
@@ -93,7 +95,7 @@ int handle_pbdkreq(PaseContext *ctx, const uint8_t *req, int reqsize,
   return l;
 }
 
-int handle_pake1(PaseContext *ctx, const uint8_t *req, int reqsize,
+int handle_pake1(PaseContext *ctx, const uint8_t *req, size_t reqsize,
                  uint8_t *res) {
   int pos = 0;
   uint64_t sender = message_get_sender(req + pos);
@@ -157,7 +159,7 @@ int handle_pake1(PaseContext *ctx, const uint8_t *req, int reqsize,
   return l;
 }
 
-int handle_pake3(PaseContext *ctx, const uint8_t *req, int reqsize,
+int handle_pake3(PaseContext *ctx, const uint8_t *req, size_t reqsize,
                  uint8_t *res) {
   uint64_t sender = message_get_sender(req);
   int pos = message_get_header_size(req);
@@ -194,7 +196,7 @@ void get_nonce(const uint8_t *msg, uint8_t *nonce) {
   // TODO: sender id
 }
 
-int encrypt_message(PaseContext *ctx, const uint8_t *msg, int msg_len,
+int encrypt_message(PaseContext *ctx, const uint8_t *msg, size_t msg_len,
                     uint8_t *buf) {
   int header_len = message_get_header_size(msg);
   int data_len = msg_len - header_len;
@@ -212,7 +214,7 @@ int encrypt_message(PaseContext *ctx, const uint8_t *msg, int msg_len,
   return msg_len + 16;
 }
 
-int decrypt_message(PaseContext *ctx, const uint8_t *msg, int msg_len,
+int decrypt_message(PaseContext *ctx, const uint8_t *msg, size_t msg_len,
                     uint8_t *buf) {
   int header_len = message_get_header_size(msg);
   int data_len = msg_len - header_len - 16;
@@ -229,11 +231,11 @@ int decrypt_message(PaseContext *ctx, const uint8_t *msg, int msg_len,
   return data_len;
 }
 
-int handle_read_report(PaseContext *ctx, const uint8_t *req, int reqsize,
+int handle_read_report(PaseContext *ctx, const uint8_t *req, size_t reqsize,
                        uint8_t *res) {
   uint8_t endpoint = 0x00;
-  uint8_t cluster = 0;    // Descriptor
-  uint8_t attribute = 0;  // ServerList
+  uint8_t cluster = 0;     // Descriptor
+  uint16_t attribute = 0;  // ServerList
   // 0x1d/0x01 Descriptor/ServerList
   // 0x28/0x02 Basic Information/VendorID
   // 0x3E/0x02 Operational Credentials/SupportedFabrics
@@ -295,6 +297,8 @@ int handle_read_report(PaseContext *ctx, const uint8_t *req, int reqsize,
         if (cluster == 0x1d && attribute == 0x01) {
           l += tlv_write_array(res + l, 1, 2);
           l += tlv_write(res + l, 0, 0, (uint16_t)0x1d);
+          l += tlv_write(res + l, 0, 0,
+                         (uint16_t)0x31);  // Network Commissioning
           l += tlv_write(res + l, 0, 0, (uint16_t)0x3456);
           l += tlv_write_eos(res + l);
         } else if (cluster == 0x28 && attribute == 0x02) {
@@ -302,8 +306,14 @@ int handle_read_report(PaseContext *ctx, const uint8_t *req, int reqsize,
         } else if (cluster == 0x28 && attribute == 0x04) {
           l += tlv_write(res + l, 1, 2, (uint16_t)BLE_PRODUCT_ID);
         } else if (cluster == 0x30 && attribute == 0x03) {
-          l += tlv_write(res + l, 1, 2,
-                         (uint8_t)0x02);  // LocationCapability = IndoorOutdoor
+          // LocationCapability = 2(IndoorOutdoor)
+          l += tlv_write(res + l, 1, 2, (uint8_t)0x02);
+        } else if (cluster == 0x31 && attribute == 0xfffc) {
+          // FeatureMap
+          l += tlv_write(res + l, 1, 2, (uint32_t)1);  // WiFi
+        } else if (cluster == 0x31 && attribute == 0x03) {
+          // ConnectMaxTimeSeconds
+          l += tlv_write(res + l, 1, 2, (uint8_t)30);
         } else if (cluster == 0x3e && attribute == 0x01) {
           l += tlv_write_array(res + l, 1, 2);
           l += tlv_write_eos(res + l);
@@ -326,30 +336,27 @@ int handle_read_report(PaseContext *ctx, const uint8_t *req, int reqsize,
   return l;
 }
 
-int handle_write_report(PaseContext *ctx, const uint8_t *req, int reqsize,
+int handle_write_report(PaseContext *ctx, const uint8_t *req, size_t reqsize,
                         uint8_t *res) {
   debug_dump("UNSUPPORTED WRITE", req, reqsize);
   return -INTERACTION_STATUS_UNSUPPORTED_WRITE;
-  return 0;
 }
 
-int handle_invoke_command(PaseContext *ctx, const uint8_t *req, int reqsize,
+int handle_invoke_command(PaseContext *ctx, const uint8_t *req, size_t reqsize,
                           uint8_t *res) {
-  uint8_t endpoint = 0x00;
-  uint8_t cluster = 0;
-  uint8_t command = 0;
-
-  int pos = 0;
-  while (pos < reqsize) {
-    tag_info ti;
-    pos += tlv_read_tag(req + pos, &ti);
-    if (ti.tag == 1 && cluster == 0) {
-      cluster = ti.val_or_len;
-    }
-    if (ti.tag == 2 && command == 0) {
-      command = ti.val_or_len;
-    }
-  }
+  tag_info ti;
+  int pos = 0, field_pos;
+  pos += tlv_find_field(req + pos, reqsize - pos, 0, &ti);  // into struct
+  pos += tlv_find_field(req + pos, reqsize - pos, 2, &ti);  // InvokeRequests
+  pos += tlv_find_field(req + pos, reqsize - pos, 0, &ti);  // CommandDataIB[0]
+  field_pos = pos + tlv_find_field(req + pos, reqsize - pos, 1, &ti);  // Fields
+  pos += tlv_find_field(req + pos, reqsize - pos, 0, &ti);  // CommandPath
+  pos += tlv_find_field(req + pos, reqsize - pos, 0, &ti);
+  uint8_t endpoint = ti.val_or_len;
+  pos += tlv_find_field(req + pos, reqsize - pos, 1, &ti);
+  uint8_t cluster = ti.val_or_len;
+  pos += tlv_find_field(req + pos, reqsize - pos, 2, &ti);
+  uint8_t command = ti.val_or_len;
 
   int l = 0;
   // InvokeResponseMessage
@@ -381,38 +388,54 @@ int handle_invoke_command(PaseContext *ctx, const uint8_t *req, int reqsize,
             l += tlv_write_eos(res + l);
           } else if (cluster == 0x3e && command == 0x00) {
             // AttestationRequest
-            uint8_t damsg[600], digest[32], sign[64];
-            int p = tlv_write_struct(damsg, 0, 0);
-            p += tlv_write_str(damsg + p, 1, 1, kCd, sizeof(kCd));
-            p += tlv_write_str(damsg + p, 1, 2, req + 25, 32);  // nonce
-            p += tlv_write(damsg + p, 1, 3, 1234567890);
-            p += tlv_write_eos(damsg + p);
+            field_pos += tlv_find_field(req + field_pos, reqsize - field_pos, 0,
+                                        &ti);  // Nonce
+            debug_dump("Nonce", ti.data_ref, ti.val_or_len);
+            uint8_t elems[900], digest[32], sign[64];
+            int p = tlv_write_struct(elems, 0, 0);
+            p += tlv_write_str(elems + p, 1, 1, kCd, sizeof(kCd));
+            p += tlv_write_str(elems + p, 1, 2, ti.data_ref,
+                               ti.val_or_len);             // nonce
+            p += tlv_write(elems + p, 1, 3, (uint32_t)0);  // TODO: timestamp
+            p += tlv_write_eos(elems + p);
             SHA256 sha256;
-            sha256.update(damsg, p);
+            sha256.update(elems, p);
             sha256.update(ctx->keys + 32, 16);
             sha256.finish(digest);
             ecdsa_sign(digest, sizeof(digest), sign, kDACPrivateKey);
             l += tlv_write_struct(res + l, 1, 1);
-            l += tlv_write_str(res + l, 1, 0, damsg, p);
+            l += tlv_write_str(res + l, 1, 0, elems, p);
             l += tlv_write_str(res + l, 1, 1, sign, sizeof(sign));
             l += tlv_write_eos(res + l);
           } else if (cluster == 0x3e && command == 0x04) {
             // CSRRequest
-            uint8_t damsg[600], digest[32], sign[64], csr[256];
+            field_pos += tlv_find_field(req + field_pos, reqsize - field_pos, 0,
+                                        &ti);  // Nonce
+            debug_dump("Nonce", ti.data_ref, ti.val_or_len);
+            uint8_t elems[900], digest[32], sign[64], csr[256];
             size_t csr_size = sizeof(csr);
             create_csr(kDACPrivateKey, kDACPublicKey, csr, &csr_size);
-            int p = tlv_write_struct(damsg, 0, 0);
-            p += tlv_write_str(damsg + p, 1, 1, csr, csr_size);
-            p += tlv_write_str(damsg + p, 1, 2, req + 25, 32);  // nonce
-            p += tlv_write_eos(damsg + p);
+            int p = tlv_write_struct(elems, 0, 0);
+            p += tlv_write_str(elems + p, 1, 1, csr, csr_size);
+            p += tlv_write_str(elems + p, 1, 2, ti.data_ref,
+                               ti.val_or_len);  // nonce
+            p += tlv_write_eos(elems + p);
             SHA256 sha256;
-            sha256.update(damsg, p);
+            sha256.update(elems, p);
             sha256.update(ctx->keys + 32, 16);
             sha256.finish(digest);
             ecdsa_sign(digest, sizeof(digest), sign, kDACPrivateKey);
             l += tlv_write_struct(res + l, 1, 1);
-            l += tlv_write_str(res + l, 1, 0, damsg, p);
+            l += tlv_write_str(res + l, 1, 0, elems, p);
             l += tlv_write_str(res + l, 1, 1, sign, sizeof(sign));
+            l += tlv_write_eos(res + l);
+          } else if (cluster == 0x3e && (command == 0x06 || command == 0x07 ||
+                                         command == 0x09 || command == 0x0B)) {
+            // NOCResponse
+            l += tlv_write_struct(res + l, 1, 1);
+            l += tlv_write(res + l, 1, 0, (uint8_t)0);
+            l += tlv_write(res + l, 1, 1, (uint8_t)1);
+            l += tlv_write_str(res + l, 1, 2, nullptr, 0);
             l += tlv_write_eos(res + l);
           } else if (cluster == 0x30 && command == 0x00) {
             // ArmFailSafe
@@ -423,6 +446,28 @@ int handle_invoke_command(PaseContext *ctx, const uint8_t *req, int reqsize,
             // SetRegulatoryConfig
             l += tlv_write_struct(res + l, 1, 1);
             l += tlv_write(res + l, 1, 0, (uint8_t)0);
+            l += tlv_write_eos(res + l);
+          } else if (cluster == 0x31 && command == 0x02) {
+            // AddOrUpdateWiFiNetwork
+            field_pos += tlv_find_field(req + field_pos, reqsize - field_pos, 0,
+                                        &ti);  // SSID
+            if (ti.data_ref) {
+              debug_dump("SSID", ti.data_ref, ti.val_or_len);
+            }
+            field_pos += tlv_find_field(req + field_pos, reqsize - field_pos, 1,
+                                        &ti);  // PASSWD
+            if (ti.data_ref) {
+              debug_dump("PASSWORD", ti.data_ref, ti.val_or_len);
+            }
+            l += tlv_write_struct(res + l, 1, 1);
+            l += tlv_write(res + l, 1, 0, (uint8_t)0);  // Success
+            l += tlv_write_eos(res + l);
+          } else if (cluster == 0x31 && command == 0x06) {
+            // Connect
+            l += tlv_write_struct(res + l, 1, 1);
+            l += tlv_write(res + l, 1, 0, (uint8_t)12);  // Unknown Error
+            l += tlv_write_str(res + l, 1, 1, (uint8_t *)"Connecting...",
+                               13);  // DebugText
             l += tlv_write_eos(res + l);
           } else {
             debug_dump("UNSUPPORTED INVOKE", req, reqsize);
@@ -465,19 +510,19 @@ inline int handle_message(PaseContext *ctx, const uint8_t *req, int reqsize,
                           uint8_t *res) {
   // TODO: check message type
   int sz = 0;
-  if (ctx->count == 1) {
+  if (ctx->msg_count == 1) {
     sz = handle_pbdkreq(ctx, req, reqsize, res);
-  } else if (ctx->count == 2) {
+  } else if (ctx->msg_count == 2) {
     sz = handle_pake1(ctx, req, reqsize, res);
-  } else if (ctx->count == 3) {
+  } else if (ctx->msg_count == 3) {
     sz = handle_pake3(ctx, req, reqsize, res);
-  } else if (ctx->count >= 4) {
-    uint8_t plain[256];
+  } else if (ctx->msg_count >= 4) {
+    uint8_t plain[1024];
     int len = decrypt_message(ctx, req, reqsize, plain);
     if (message_get_proto_id(plain) == MSG_PROTO_ID_INTERACTION_MODEL) {
       uint16_t exchange_id = message_get_proto_echange_id(plain);
       int hl = message_get_pheader_size(plain);
-      int mhl = message_write_header(res, ctx->session_id, ctx->count, 0);
+      int mhl = message_write_header(res, ctx->session_id, ctx->msg_count, 0);
       int ret = 0, phl = 0;
       if (message_get_proto_op(plain) == MSG_PROTO_OP_INTERACTION_READ) {
         phl = message_write_pheader(res + mhl, MSG_PROTO_OP_INTERACTION_DATA,
@@ -516,6 +561,41 @@ inline int handle_message(PaseContext *ctx, const uint8_t *req, int reqsize,
 }
 
 uint16_t check_btp_packet_send(PaseContext *ctx, uint8_t **data) {
+  if (ctx->send_pos >= ctx->send_size && ctx->recv_size > 0 &&
+      (ctx->recv_buf[0] & BTP_E_MASK) != 0) {
+    const uint8_t *req = ctx->recv_buf;
+    size_t reqsize = ctx->recv_size;
+    ctx->recv_size = 0;
+    if (req[0] == 0x65) {
+      ctx->msg_count = 1;
+      ctx->btp_tx_seq = 0;
+      *data = ctx->send_buf;
+      return handle_btp_handshake(ctx, req, reqsize, ctx->send_buf);
+    }
+    if (reqsize < 6) {
+      return 0;
+    }
+    int p = btp_get_header_size(req);
+
+    int sz = handle_message(ctx, req + p, reqsize - p,
+                            ctx->send_buf + BTP_MAX_HEADER_SIZE);
+    if (sz == 0) {
+      // TODO ack
+      /*
+        if (req[0] == BTP_A_MASK) {
+          res[0] = BTP_A_MASK;
+          res[1] = btp_get_seq(req);
+          res[2] = ctx->btp_count + 1;
+          return 3;
+        }
+        ctx->btp_count++;
+        */
+      return 0;
+    }
+    ctx->msg_count++;
+    ctx->send_pos = BTP_MAX_HEADER_SIZE;
+    ctx->send_size = sz + BTP_MAX_HEADER_SIZE;
+  }
   if (ctx->send_pos >= ctx->send_size) {
     return 0;
   }
@@ -529,44 +609,31 @@ uint16_t check_btp_packet_send(PaseContext *ctx, uint8_t **data) {
     flags |= BTP_E_MASK;
   }
   uint8_t *buf = ctx->send_buf + ctx->send_pos - hsz;
-  btp_write_header_f(buf, flags, ctx->btp_rx_seq, ++ctx->btp_count,
+  btp_write_header_f(buf, flags, ctx->btp_rx_seq, ++ctx->btp_tx_seq,
                      ctx->send_size - ctx->send_pos);
   ctx->send_pos += sz;
   *data = buf;
   return sz + hsz;
 }
 
-int handle_btp_packet(PaseContext *ctx, const uint8_t *req, int reqsize,
-                      uint8_t *res) {
-  if (req[0] == 0x65) {
-    ctx->count = 1;
-    ctx->btp_count = 0;
-    return handle_btp_handshake(ctx, req, reqsize, res);
+int handle_btp_packet(PaseContext *ctx, const uint8_t *req, int reqsize) {
+  if (reqsize < 2 || (req[0] & (BTP_B_MASK | BTP_E_MASK | BTP_C_FLAG)) == 0) {
+    return 0;  // no message data
   }
-  if (reqsize < 6) {
+  if (ctx->recv_size > 0 && (ctx->recv_buf[0] & BTP_E_MASK) == 0) {
+    // concat packets
+    size_t hl = btp_get_header_size(req);
+    memcpy(ctx->recv_buf + ctx->recv_size, req + hl, reqsize - hl);
+    ctx->btp_rx_seq = btp_get_seq(req);
+    ctx->recv_size += reqsize - hl;
+    ctx->recv_buf[0] |= req[0] & BTP_E_MASK;
     return 0;
   }
+  if (ctx->recv_size > 0) {
+    return 1;  // busy
+  }
+  memcpy(ctx->recv_buf, req, reqsize);
+  ctx->recv_size = reqsize;
   ctx->btp_rx_seq = btp_get_seq(req);
-  int p = btp_get_header_size(req);
-
-  int sz = handle_message(ctx, req + p, reqsize - p,
-                          ctx->send_buf + BTP_MAX_HEADER_SIZE);
-  if (sz == 0) {
-    // TODO
-    /*
-      if (req[0] == BTP_A_MASK) {
-        res[0] = BTP_A_MASK;
-        res[1] = btp_get_seq(req);
-        res[2] = ctx->btp_count + 1;
-        return 3;
-      }
-      ctx->btp_count++;
-      */
-    return 0;
-  }
-
-  ctx->count++;
-  ctx->send_pos = BTP_MAX_HEADER_SIZE;
-  ctx->send_size = sz + BTP_MAX_HEADER_SIZE;
   return 0;
 }

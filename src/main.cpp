@@ -14,9 +14,8 @@ static NimBLEAdvertising* pAdvertising = nullptr;
 static NimBLECharacteristic* pTXCharacteristic = nullptr;
 static NimBLECharacteristic* pRXCharacteristic = nullptr;
 
-uint8_t recvbuf[256];
-uint8_t recvsize = 0;
 PaseContext* pase = nullptr;
+bool ready = false;
 
 class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
   void onRead(NimBLECharacteristic* pCharacteristic) {
@@ -33,11 +32,11 @@ class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
         LOG.print(",");
         LOG.print(c, HEX);
       }
-      while (recvsize > 0)
-        ;
       LOG.println("]");
-      recvsize = v.size();
-      memcpy(recvbuf, v.data(), recvsize);
+      if (pase == nullptr) {
+        pase = pase_init();  // todo delete
+      }
+      handle_btp_packet(pase, v.data(), v.size());
     } else {
       LOG.print(pCharacteristic->getUUID().toString().c_str());
       LOG.print(": onWrite(), value: ");
@@ -73,12 +72,15 @@ class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
     str += std::string(NimBLEAddress(desc->peer_ota_addr)).c_str();
     if (subValue == 0) {
       str += " Unsubscribed to ";
+      ready = false;
     } else if (subValue == 1) {
       str += " Subscribed to notfications for ";
+      ready = true;
     } else if (subValue == 2) {
       str += " Subscribed to indications for ";
     } else if (subValue == 3) {
       str += " Subscribed to notifications and indications for ";
+      ready = true;
     }
     str += std::string(pCharacteristic->getUUID()).c_str();
     LOG.println(str);
@@ -136,29 +138,13 @@ void setup() {
 }
 
 void loop() {
-  if (recvsize > 0) {
-    delay(80);
-    if (pase == nullptr) {
-      pase = pase_init();  // todo delete
-    }
-    uint8_t sendbuf[256];
-    int sendsize = handle_btp_packet(pase, recvbuf, recvsize, sendbuf);
-    recvsize = 0;
-    if (sendsize > 0) {
-      pRXCharacteristic->setValue(sendbuf, sendsize);
-      pRXCharacteristic->notify();
-      LOG.print("SEND RESPONSE ");
-      LOG.print(sendsize);
-      LOG.println(" bytes");
-    }
-  }
-  if (pase != nullptr) {
+  if (ready && pase != nullptr) {
     uint8_t* data;
     uint16_t size = check_btp_packet_send(pase, &data);
     if (size > 0) {
       pRXCharacteristic->setValue(data, size);
       pRXCharacteristic->notify();
-      LOG.print("SEND RESPONSE2 ");
+      LOG.print("SEND RESPONSE ");
       LOG.print(size);
       LOG.println(" bytes");
     }

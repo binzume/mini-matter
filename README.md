@@ -4,12 +4,7 @@ MatterデバイスのふりをしてWiFiのSSIDとパスワードを取得する
 
 [esp-matter](https://github.com/espressif/esp-matter) は巨大で、WiFiのセットアップだけに利用するには、メモリとFlashを圧迫するので作りました。
 
-WIP: まだWiFiのセットアップまでたどりつきません。
-
-Done:
-
-- BTP/Matter TLV/Matter Message
-- SPAKE2+の鍵交換
+AndroidのGoogle Homeアプリで接続して、WiFiのSSIDとパスワードを設定するところまで動きます。iOSはHomeハブが無いと設定できないので、まだ試してません。
 
 # License
 

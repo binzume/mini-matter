@@ -101,7 +101,6 @@ static void btp_update_size(uint8_t *buf, uint16_t size) {
 #define INTERACTION_STATUS_UNSUPPORTED_ATTRIBUTE 0x86
 #define INTERACTION_STATUS_UNSUPPORTED_WRITE 0x88
 
-
 static int message_get_header_size(const uint8_t *buf) {
   int sz = 8;
   if (buf[0] & MSG_FLAG_S) {
@@ -410,4 +409,23 @@ static int tlv_read_tag(const uint8_t *buf, tag_info *ti) {
     ti->data_ref = nullptr;
   }
   return sz;
+}
+
+int tlv_find_field(const uint8_t *tlv, size_t size, uint8_t tag, tag_info *ti) {
+  int pos = 0, d = 0;
+  while (pos < size) {
+    pos += tlv_read_tag(tlv + pos, ti);
+    if (d == 0 && ti->tag == tag) {
+      return pos;
+    }
+    if (ti->val_type == TLV_VAL_TYPE_STRUCT ||
+        ti->val_type == TLV_VAL_TYPE_ARRAY ||
+        ti->val_type == TLV_VAL_TYPE_LIST) {
+      d++;
+    }
+    if (ti->val_type == TLV_VAL_TYPE_END) {
+      d--;
+    }
+  }
+  return pos;
 }
