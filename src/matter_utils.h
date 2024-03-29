@@ -20,9 +20,20 @@ static void debug_dump(const char *msg, const uint8_t *buf = nullptr,
   }
   Serial.println();
 }
-#elif
+
+static void debug_printf(const char *fmt, ...) {
+  char buf[256];
+  va_list args;
+  va_start(args, fmt);
+  vsnprintf(buf, sizeof(buf), fmt, args);
+  va_end(args);
+  Serial.println(buf);
+}
+
+#else
 static void debug_dump(const char *msg, const uint8_t *buf = nullptr,
-                       int len = 0) {);
+                       int len = 0) {}
+static void debug_printf(const char *msg, const char *fmt, ...) {}
 #endif
 
 static void get_qr_code_string(char *dst, uint16_t vid, uint16_t pid,
@@ -55,5 +66,5 @@ static void get_qr_code_string(char *dst, uint16_t vid, uint16_t pid,
       d /= 38;
     }
   }
-  dst[p-1] = 0;
+  dst[p - 1] = 0;
 }

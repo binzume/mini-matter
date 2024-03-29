@@ -234,8 +234,8 @@ int decrypt_message(PaseContext *ctx, const uint8_t *msg, size_t msg_len,
 int handle_read_report(PaseContext *ctx, const uint8_t *req, size_t reqsize,
                        uint8_t *res) {
   uint8_t endpoint = 0x00;
-  uint8_t cluster = 0;     // Descriptor
-  uint16_t attribute = 0;  // ServerList
+  uint8_t cluster = 0;
+  uint16_t attribute = 0;
   // 0x1d/0x01 Descriptor/ServerList
   // 0x28/0x02 Basic Information/VendorID
   // 0x3E/0x02 Operational Credentials/SupportedFabrics
@@ -251,6 +251,8 @@ int handle_read_report(PaseContext *ctx, const uint8_t *req, size_t reqsize,
       attribute = ti.val_or_len;
     }
   }
+
+  debug_printf("HANDLE READ %04x:%04x", cluster, attribute);
 
   int l = 0;
   // ReportDataMessage
@@ -357,6 +359,8 @@ int handle_invoke_command(PaseContext *ctx, const uint8_t *req, size_t reqsize,
   uint8_t cluster = ti.val_or_len;
   pos += tlv_find_field(req + pos, reqsize - pos, 2, &ti);
   uint8_t command = ti.val_or_len;
+
+  debug_printf("HANDLE INVOKE %04x:%04x", cluster, command);
 
   int l = 0;
   // InvokeResponseMessage
