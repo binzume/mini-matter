@@ -1,3 +1,5 @@
+#include <stdint.h>
+
 #define MATTER_DEBUG_LOG
 
 #ifdef MATTER_DEBUG_LOG
@@ -33,7 +35,7 @@ static void debug_printf(const char *fmt, ...) {
 #else
 static void debug_dump(const char *msg, const uint8_t *buf = nullptr,
                        int len = 0) {}
-static void debug_printf(const char *msg, const char *fmt, ...) {}
+static void debug_printf(const char *fmt, ...) {}
 #endif
 
 static void get_qr_code_string(char *dst, uint16_t vid, uint16_t pid,

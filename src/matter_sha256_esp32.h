@@ -1,7 +1,5 @@
 #include <mbedtls/sha256.h>
 
-#include "matter_crypt.h"
-
 struct SHA256 {
   mbedtls_sha256_context ctx;
   SHA256() {

@@ -1,5 +1,4 @@
-#include "matter_crypt_esp32.h"
-
+#include <string.h>
 #include <mbedtls/ccm.h>
 #include <mbedtls/ecdh.h>
 #include <mbedtls/ecdsa.h>
@@ -8,6 +7,9 @@
 #include <mbedtls/pkcs5.h>
 #include <mbedtls/sha256.h>
 #include <mbedtls/x509_csr.h>
+
+#include "matter_crypt.h"
+#include "matter_sha256_esp32.h"
 
 void pbkdf2_sha256_hmac(const uint8_t *password, size_t plen,
                         const uint8_t *salt, size_t salt_len,

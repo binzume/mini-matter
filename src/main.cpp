@@ -15,7 +15,7 @@ static NimBLEAdvertising* pAdvertising = nullptr;
 static NimBLECharacteristic* pTXCharacteristic = nullptr;
 static NimBLECharacteristic* pRXCharacteristic = nullptr;
 
-PaseContext* pase = nullptr;
+MatterSession* pase = nullptr;
 bool ready = false;
 
 class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
@@ -94,10 +94,10 @@ void startAdv() {
       0x00,
       DEVICE_DISCRIMINATOR & 0xff,
       (DEVICE_DISCRIMINATOR >> 8) | (BLE_ADVERTISEMENT_VERSION << 4),
-      BLE_VENDOR_ID & 0xff,
-      BLE_VENDOR_ID >> 8,
-      BLE_PRODUCT_ID & 0xff,
-      BLE_PRODUCT_ID >> 8,
+      MATTER_VENDOR_ID & 0xff,
+      MATTER_VENDOR_ID >> 8,
+      MATTER_PRODUCT_ID & 0xff,
+      MATTER_PRODUCT_ID >> 8,
       0};
   data.setServiceData(SERVICE_UUID, std::string((char*)buf, sizeof(buf)));
   pAdvertising->stop();
@@ -133,8 +133,8 @@ void setup() {
   startAdv();
 
   char qr[32];
-  get_qr_code_string(qr, BLE_VENDOR_ID, BLE_PRODUCT_ID, DEVICE_DISCRIMINATOR,
-                     PIN);
+  get_qr_code_string(qr, MATTER_VENDOR_ID, MATTER_PRODUCT_ID, DEVICE_DISCRIMINATOR,
+                     MATTER_PASSCODE);
   LOG.print("QR: https://chart.apis.google.com/chart?chs=200x200&cht=qr&chl=");
   LOG.println(qr);
 }

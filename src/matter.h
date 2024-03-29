@@ -4,8 +4,8 @@
 #define MATTER_BLE_RX_UUID "18EE2EF5-263D-4559-959F-4F9C429F9D12"
 #define MATTER_BLE_ADDITIONAL_UUID "64630238-8772-45F2-B87D-748A83218F04"
 
-struct PaseContext *pase_init();
+struct MatterSession *pase_init();
 // void pase_free(struct PaseContext *);
 
-int handle_btp_packet(struct PaseContext *ctx, const uint8_t *req, int reqsize);
-uint16_t check_btp_packet_send(PaseContext *ctx, uint8_t **data);
+int handle_btp_packet(struct MatterSession *ctx, const uint8_t *req, int reqsize);
+uint16_t check_btp_packet_send(MatterSession *ctx, uint8_t **data);
