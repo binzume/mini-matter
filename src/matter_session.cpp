@@ -1,4 +1,4 @@
-#include "matter_pase.h"
+#include "matter.h"
 
 #include "matter_config.h"
 #include "matter_crypt_esp32.h"

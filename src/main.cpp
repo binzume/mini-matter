@@ -1,8 +1,8 @@
 #include <Arduino.h>
 #include <NimBLEDevice.h>
 
+#include "matter.h"
 #include "matter_config.h"
-#include "matter_pase.h"
 #include "matter_utils.h"
 
 #define LOG Serial
@@ -133,7 +133,8 @@ void setup() {
   startAdv();
 
   char qr[32];
-  get_qr_code_string(qr, BLE_VENDOR_ID, BLE_PRODUCT_ID, DEVICE_DISCRIMINATOR, PIN);
+  get_qr_code_string(qr, BLE_VENDOR_ID, BLE_PRODUCT_ID, DEVICE_DISCRIMINATOR,
+                     PIN);
   LOG.print("QR: https://chart.apis.google.com/chart?chs=200x200&cht=qr&chl=");
   LOG.println(qr);
 }
