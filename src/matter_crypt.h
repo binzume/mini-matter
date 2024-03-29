@@ -1,31 +1,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// TODO
-#if 1
-#include <Arduino.h>
-
-static void debug_dump(const char *msg, const uint8_t *buf = nullptr,
-                       int len = 0) {
-  if (msg) {
-    Serial.print(msg);
-    Serial.print(": ");
-  }
-  for (int i = 0; i < len; i++) {
-    if (buf[i] < 0x10) {
-      Serial.print("0");
-    }
-    Serial.print(buf[i], HEX);
-    if (i != len - 1) {
-      Serial.print(",");
-    }
-  }
-  Serial.println();
-}
-#elif
-static void debug_dump(const char *msg, const uint8_t *buf = nullptr,
-                       int len = 0) {);
-#endif
+#include "matter_utils.h"
 
 const uint8_t spake2p_M[] = {
     0x04, 0x88, 0x6e, 0x2f, 0x97, 0xac, 0xe4, 0x6e, 0x55, 0xba, 0x9d,

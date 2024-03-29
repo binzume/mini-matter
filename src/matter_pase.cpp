@@ -506,7 +506,7 @@ int handle_invoke_command(PaseContext *ctx, const uint8_t *req, size_t reqsize,
   return l;
 }
 
-inline int handle_message(PaseContext *ctx, const uint8_t *req, int reqsize,
+inline int handle_message(PaseContext *ctx, uint8_t *req, int reqsize,
                           uint8_t *res) {
   // TODO: check message type
   int sz = 0;
@@ -517,7 +517,7 @@ inline int handle_message(PaseContext *ctx, const uint8_t *req, int reqsize,
   } else if (ctx->msg_count == 3) {
     sz = handle_pake3(ctx, req, reqsize, res);
   } else if (ctx->msg_count >= 4) {
-    uint8_t plain[1024];
+    uint8_t *plain = req + message_get_header_size(req);
     int len = decrypt_message(ctx, req, reqsize, plain);
     if (message_get_proto_id(plain) == MSG_PROTO_ID_INTERACTION_MODEL) {
       uint16_t exchange_id = message_get_proto_echange_id(plain);
@@ -563,7 +563,7 @@ inline int handle_message(PaseContext *ctx, const uint8_t *req, int reqsize,
 uint16_t check_btp_packet_send(PaseContext *ctx, uint8_t **data) {
   if (ctx->send_pos >= ctx->send_size && ctx->recv_size > 0 &&
       (ctx->recv_buf[0] & BTP_E_MASK) != 0) {
-    const uint8_t *req = ctx->recv_buf;
+    uint8_t *req = ctx->recv_buf;
     size_t reqsize = ctx->recv_size;
     ctx->recv_size = 0;
     if (req[0] == 0x65) {
@@ -617,6 +617,7 @@ uint16_t check_btp_packet_send(PaseContext *ctx, uint8_t **data) {
 }
 
 int handle_btp_packet(PaseContext *ctx, const uint8_t *req, int reqsize) {
+  debug_dump("RECV BTP", req, reqsize);
   if (reqsize < 2 || (req[0] & (BTP_B_MASK | BTP_E_MASK | BTP_C_FLAG)) == 0) {
     return 0;  // no message data
   }

@@ -3,6 +3,7 @@
 
 #include "matter_config.h"
 #include "matter_pase.h"
+#include "matter_utils.h"
 
 #define LOG Serial
 
@@ -27,14 +28,9 @@ class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* pCharacteristic) {
     if (pCharacteristic == pTXCharacteristic) {
       auto v = pCharacteristic->getValue();
-      LOG.print("RECV:[");
-      for (auto c : v) {
-        LOG.print(",");
-        LOG.print(c, HEX);
-      }
-      LOG.println("]");
       if (pase == nullptr) {
         pase = pase_init();  // todo delete
+        ready = false;
       }
       handle_btp_packet(pase, v.data(), v.size());
     } else {
@@ -135,6 +131,11 @@ void setup() {
 
   pAdvertising = NimBLEDevice::getAdvertising();
   startAdv();
+
+  char qr[32];
+  get_qr_code_string(qr, BLE_VENDOR_ID, BLE_PRODUCT_ID, DEVICE_DISCRIMINATOR, PIN);
+  LOG.print("QR: https://chart.apis.google.com/chart?chs=200x200&cht=qr&chl=");
+  LOG.println(qr);
 }
 
 void loop() {
