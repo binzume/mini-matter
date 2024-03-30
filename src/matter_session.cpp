@@ -6,6 +6,7 @@
 #include "matter_config.h"
 #include "matter_crypt.h"
 #include "matter_protocol.h"
+#include "matter_wifi.h"
 
 MatterSession *pase_init() {
   MatterSession *ctx = new MatterSession();
@@ -14,8 +15,11 @@ MatterSession *pase_init() {
   ctx->send_pos = 0;
   ctx->msg_count = 0;
   ctx->btp_tx_seq = 0;
+  ctx->network_state = 0;
   return ctx;
 }
+
+int8_t get_network_state(MatterSession *ctx) { return ctx->network_state; }
 
 int handle_btp_handshake(MatterSession *ctx, const uint8_t *req, size_t reqsize,
                          uint8_t *res) {
@@ -399,22 +403,31 @@ int handle_invoke_command(MatterSession *ctx, const uint8_t *req,
             l += tlv_write(res + l, 1, 0, (uint8_t)0);
           } else if (cluster == 0x31 && command == 0x02) {
             // AddOrUpdateWiFiNetwork
+            char ssid[MAX_WIFI_SSID_LEN + 1] = {0};
+            char pass[MAX_WIFI_SSID_LEN + 1] = {0};
             field_pos += tlv_find_field(req + field_pos, reqsize - field_pos, 0,
                                         &ti);  // SSID
             if (ti.data_ref) {
+              memcpy(ssid, ti.data_ref, ti.val_or_len);
+              ssid[ti.val_or_len] = 0;
               debug_dump("SSID", ti.data_ref, ti.val_or_len);
             }
             field_pos += tlv_find_field(req + field_pos, reqsize - field_pos, 1,
                                         &ti);  // PASSWD
             if (ti.data_ref) {
-              debug_dump("PASSWORD", ti.data_ref, ti.val_or_len);
+              memcpy(pass, ti.data_ref, ti.val_or_len);
+              pass[ti.val_or_len] = 0;
             }
             l += tlv_write(res + l, 1, 0, (uint8_t)0);  // Success
+            wifi_setup(ssid, pass);
           } else if (cluster == 0x31 && command == 0x06) {
             // Connect
-            l += tlv_write(res + l, 1, 0, (uint8_t)12);  // Unknown Error
-            l += tlv_write_str(res + l, 1, 1, (uint8_t *)"Connecting...",
-                               13);  // DebugText
+            debug_printf("Connecting...");
+            bool status = wifi_connect();
+            ctx->network_state = status ? 1 : -1;
+            l += tlv_write(res + l, 1, 0, (uint8_t)(status ? 0 : 12));
+            l += tlv_write(res + l, 1, 2, (int8_t)0);
+            debug_printf("Wifi Connect Result: %d", status);
           } else {
             debug_dump("UNSUPPORTED INVOKE", req, reqsize);
             return -INTERACTION_STATUS_UNSUPPORTED_COMMAND;
@@ -488,7 +501,7 @@ inline int handle_message(MatterSession *ctx, uint8_t *req, int reqsize,
   return sz;
 }
 
-uint16_t check_btp_packet_send(MatterSession *ctx, uint8_t **data) {
+uint16_t next_btp_packet_to_send(MatterSession *ctx, uint8_t **data) {
   if (ctx->send_pos >= ctx->send_size && ctx->recv_size > 0 &&
       (ctx->recv_buf[0] & BTP_E_MASK) != 0) {
     uint8_t *req = ctx->recv_buf;

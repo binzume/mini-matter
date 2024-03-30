@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <NimBLEDevice.h>
+#include <WiFi.h>
 
 #include "matter.h"
 #include "matter_config.h"
@@ -83,10 +84,6 @@ class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
   };
 };
 
-static CharacteristicCallbacks chrCallbacks;
-
-#define BLE_ADVERTISEMENT_VERSION 0
-
 void startAdv() {
   NimBLEAdvertisementData data;
   data.setFlags(0x06);
@@ -119,6 +116,7 @@ void setup() {
   NimBLEService* pService = pServer->createService(SERVICE_UUID);
 
   // Create BLE Characteristics
+  CharacteristicCallbacks chrCallbacks;
   pTXCharacteristic =
       pService->createCharacteristic(TX_UUID, NIMBLE_PROPERTY::WRITE);
   pTXCharacteristic->setCallbacks(&chrCallbacks);
@@ -133,23 +131,34 @@ void setup() {
   startAdv();
 
   char qr[32];
-  get_qr_code_string(qr, MATTER_VENDOR_ID, MATTER_PRODUCT_ID, DEVICE_DISCRIMINATOR,
-                     MATTER_PASSCODE);
+  get_qr_code_string(qr, MATTER_VENDOR_ID, MATTER_PRODUCT_ID,
+                     DEVICE_DISCRIMINATOR, MATTER_PASSCODE);
   LOG.print("QR: https://chart.apis.google.com/chart?chs=200x200&cht=qr&chl=");
   LOG.println(qr);
+
+  bool connected = false;
+  while (!connected) {
+    if (ready && pase != nullptr) {
+      uint8_t* data;
+      uint16_t size = next_btp_packet_to_send(pase, &data);
+      if (size > 0) {
+        pRXCharacteristic->setValue(data, size);
+        pRXCharacteristic->notify();
+        LOG.print("SEND RESPONSE ");
+        LOG.print(size);
+        LOG.println(" bytes");
+      }
+      if (get_network_state(pase) == MATTER_NETWORK_CONNECTED) {
+        LOG.println("WiFi Connected");
+        LOG.println("IP address: ");
+        LOG.println(WiFi.localIP());
+        break;
+      }
+    }
+    delay(1);
+  }
+  delay(1000);
+  NimBLEDevice::deinit(true);
 }
 
-void loop() {
-  if (ready && pase != nullptr) {
-    uint8_t* data;
-    uint16_t size = check_btp_packet_send(pase, &data);
-    if (size > 0) {
-      pRXCharacteristic->setValue(data, size);
-      pRXCharacteristic->notify();
-      LOG.print("SEND RESPONSE ");
-      LOG.print(size);
-      LOG.println(" bytes");
-    }
-  }
-  delay(1);
-}
+void loop() {}

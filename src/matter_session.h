@@ -19,5 +19,5 @@ struct MatterSession {
   uint16_t session_id;  // initiator secure session id
   uint32_t msg_count;
   SHA256 contextHash;
+  int8_t network_state;
 };
-
