@@ -1,10 +1,8 @@
 #include <Arduino.h>
 #include <NimBLEDevice.h>
-#include <WiFi.h>
 
 #include "matter.h"
-#include "matter_config.h"
-#include "matter_utils.h"
+#include "matter_ble_server.h"
 
 #define LOG Serial
 
@@ -44,7 +42,7 @@ class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
    *  the value can be changed here before sending if desired.
    */
   void onNotify(NimBLECharacteristic* pCharacteristic) {
-    LOG.println("Sending notification to clients");
+    debug_dump("Sending notification to clients");
   };
 
   /** The status returned in status is defined in NimBLECharacteristic.h.
@@ -58,7 +56,7 @@ class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
     str += code;
     str += ", ";
     str += NimBLEUtils::returnCodeToString(code);
-    LOG.println(str);
+    debug_dump(str.c_str());
   };
 
   void onSubscribe(NimBLECharacteristic* pCharacteristic,
@@ -80,7 +78,7 @@ class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
       ready = true;
     }
     str += std::string(pCharacteristic->getUUID()).c_str();
-    LOG.println(str);
+    debug_dump(str.c_str());
   };
 };
 
@@ -102,10 +100,7 @@ void startAdv() {
   pAdvertising->start();
 }
 
-void setup() {
-  LOG.begin(115200);
-  LOG.println("Starting Matter PASE");
-
+void wait_for_commissioning_complete() {
   NimBLEDevice::init("ESP32");
 
   // Create the BLE Server
@@ -130,12 +125,6 @@ void setup() {
   pAdvertising = NimBLEDevice::getAdvertising();
   startAdv();
 
-  char qr[32];
-  get_qr_code_string(qr, MATTER_VENDOR_ID, MATTER_PRODUCT_ID,
-                     DEVICE_DISCRIMINATOR, MATTER_PASSCODE);
-  LOG.print("QR: https://chart.apis.google.com/chart?chs=200x200&cht=qr&chl=");
-  LOG.println(qr);
-
   bool connected = false;
   while (!connected) {
     if (ready && pase != nullptr) {
@@ -144,21 +133,14 @@ void setup() {
       if (size > 0) {
         pRXCharacteristic->setValue(data, size);
         pRXCharacteristic->notify();
-        LOG.print("SEND RESPONSE ");
-        LOG.print(size);
-        LOG.println(" bytes");
+        debug_printf("SEND RESPONSE (%d bytes)", size);
       }
       if (get_network_state(pase) == MATTER_NETWORK_CONNECTED) {
-        LOG.println("WiFi Connected");
-        LOG.println("IP address: ");
-        LOG.println(WiFi.localIP());
         break;
       }
     }
     delay(1);
   }
-  delay(1000);
+  delay(500);
   NimBLEDevice::deinit(true);
 }
-
-void loop() {}

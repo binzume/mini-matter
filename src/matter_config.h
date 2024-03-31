@@ -1,13 +1,18 @@
 
 #define MATTER_VENDOR_ID 0xFFF1
+#ifndef MATTER_PRODUCT_ID
 #define MATTER_PRODUCT_ID 0x8000
+#endif
+#ifndef MATTER_PASSCODE
 #define MATTER_PASSCODE 20202021
+#endif
+#ifndef DEVICE_DISCRIMINATOR
 #define DEVICE_DISCRIMINATOR 3840
-
+#endif
 // pairing code 34970112332
 
 // DA Cert for FFF1:8000
-// from ExampleDACs.cpp
+// from ExampleDACs.cpp https://github.com/project-chip/connectedhomeip
 const unsigned char kDACert[] = {
     0x30, 0x82, 0x01, 0xe9, 0x30, 0x82, 0x01, 0x8e, 0xa0, 0x03, 0x02, 0x01,
     0x02, 0x02, 0x08, 0x23, 0x8a, 0x64, 0x7b, 0xbc, 0x4c, 0x30, 0xdd, 0x30,
