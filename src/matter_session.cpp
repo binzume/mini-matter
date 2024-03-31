@@ -451,13 +451,16 @@ inline int handle_message(MatterSession *ctx, uint8_t *req, int reqsize,
                           uint8_t *res) {
   // TODO: check message type
   int sz = 0;
-  if (ctx->msg_count == 1) {
-    sz = handle_pbdkreq(ctx, req, reqsize, res);
-  } else if (ctx->msg_count == 2) {
-    sz = handle_pake1(ctx, req, reqsize, res);
-  } else if (ctx->msg_count == 3) {
-    sz = handle_pake3(ctx, req, reqsize, res);
-  } else if (ctx->msg_count >= 4) {
+  if (message_get_session_id(req) == 0) {
+    uint8_t opcode = message_get_proto_op(req + message_get_header_size(req));
+    if (opcode == MSG_PROTO_OP_PBKD_REQ) {
+      sz = handle_pbdkreq(ctx, req, reqsize, res);
+    } else if (opcode == MSG_PROTO_OP_PASE_PAKE1) {
+      sz = handle_pake1(ctx, req, reqsize, res);
+    } else if (opcode == MSG_PROTO_OP_PASE_PAKE3) {
+      sz = handle_pake3(ctx, req, reqsize, res);
+    }
+  } else {
     uint8_t *plain = req + message_get_header_size(req);
     int len = decrypt_message(ctx, req, reqsize, plain);
     if (message_get_proto_id(plain) == MSG_PROTO_ID_INTERACTION_MODEL) {

@@ -139,6 +139,10 @@ static uint32_t message_get_counter(const uint8_t *buf) {
   return buf[4] | buf[5] << 8 | buf[6] << 16 | buf[7] << 24;
 }
 
+static uint16_t message_get_session_id(const uint8_t *buf) {
+  return buf[1] | buf[2] << 8;
+}
+
 static int message_write_header(uint8_t *buf, uint16_t session,
                                 uint32_t msgcount, uint64_t dst64) {
   buf[0] = dst64 ? MSG_FLAG_DSIZ_64 : 0;  // MSG_FLAG_S;
