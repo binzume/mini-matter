@@ -1,4 +1,3 @@
-#include <string.h>
 #include <mbedtls/ccm.h>
 #include <mbedtls/ecdh.h>
 #include <mbedtls/ecdsa.h>
@@ -7,9 +6,27 @@
 #include <mbedtls/pkcs5.h>
 #include <mbedtls/sha256.h>
 #include <mbedtls/x509_csr.h>
+#include <string.h>
 
 #include "matter_crypt.h"
-#include "matter_sha256_esp32.h"
+
+struct SHA256Context {
+  mbedtls_sha256_context ctx;
+};
+
+SHA256Context *sha256_init() {
+  SHA256Context *ctx = new SHA256Context();
+  mbedtls_sha256_init(&ctx->ctx);
+  return ctx;
+}
+void sha256_update(SHA256Context *ctx, const uint8_t *buf, uint32_t len) {
+  mbedtls_sha256_update(&ctx->ctx, buf, len);
+}
+void sha256_finish(SHA256Context *ctx, uint8_t *out) {
+  mbedtls_sha256_finish(&ctx->ctx, out);
+  mbedtls_sha256_free(&ctx->ctx);
+  delete ctx;
+}
 
 void pbkdf2_sha256_hmac(const uint8_t *password, size_t plen,
                         const uint8_t *salt, size_t salt_len,
@@ -120,9 +137,9 @@ void create_csr(const uint8_t *privkey, const uint8_t *pubkey, uint8_t *out_csr,
 #ifndef CONFIG_MBEDTLS_HKDF_C
 // do not require CONFIG_MBEDTLS_HKDF_C flag to avoid recompile sdk.
 int mbedtls_hkdf(const mbedtls_md_info_t *md, const unsigned char *salt,
-                  size_t salt_len, const unsigned char *ikm, size_t ikm_len,
-                  const unsigned char *info, size_t info_len,
-                  unsigned char *okm, size_t okm_len) {
+                 size_t salt_len, const unsigned char *ikm, size_t ikm_len,
+                 const unsigned char *info, size_t info_len, unsigned char *okm,
+                 size_t okm_len) {
   const int hashLen = 32;  // sha256
   if (mbedtls_md_get_size(md) != hashLen || okm_len > 256) {
     return 1;

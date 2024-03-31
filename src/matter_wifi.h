@@ -1,3 +1,4 @@
+#pragma once
 #define MAX_WIFI_SSID_LEN 32
 #define MAX_WIFI_PASS_LEN 32
 

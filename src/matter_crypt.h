@@ -1,3 +1,4 @@
+#pragma once
 #include <stddef.h>
 #include <stdint.h>
 
@@ -48,3 +49,31 @@ void spake2p_round02(struct SHA256 *hash, const uint8_t *ws, size_t ws_len,
                      const uint8_t *pA, size_t pA_len, uint8_t *pB,
                      size_t *pB_len, uint8_t *ckey, size_t ckey_len,
                      uint8_t *skey, size_t skey_len);
+
+struct SHA256Context;
+SHA256Context *sha256_init();
+void sha256_update(SHA256Context *ctx, const uint8_t *buf, uint32_t len);
+void sha256_finish(SHA256Context *ctx, uint8_t *out);
+
+struct SHA256 {
+  SHA256Context *ctx;
+  SHA256() : ctx(nullptr) {}
+  void update(const uint8_t *buf, uint32_t len) {
+    if (!ctx) {
+      ctx = sha256_init();
+    }
+    sha256_update(ctx, buf, len);
+  }
+  void updateBlock(const uint8_t *buf, uint32_t len) {
+    uint8_t dummy[4] = {0};
+    update((uint8_t *)&len, 4);  // todo byte order
+    update(dummy, 4);
+    if (len > 0) {
+      update(buf, len);
+    }
+  }
+  void finish(uint8_t *out) {
+    sha256_finish(ctx, out);
+    ctx = nullptr;
+  }
+};

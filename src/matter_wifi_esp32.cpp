@@ -1,3 +1,5 @@
+#ifdef ESP32
+
 #include <WiFi.h>
 
 void wifi_setup(const char* ssid, const char* password) {
@@ -10,3 +12,5 @@ bool wifi_connect() {
   }
   return WiFi.status() == WL_CONNECTED;
 }
+
+#endif

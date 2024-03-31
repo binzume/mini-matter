@@ -1,62 +1,29 @@
+#ifdef ESP32
+
 #include <Arduino.h>
 #include <NimBLEDevice.h>
 
 #include "matter.h"
 #include "matter_ble_server.h"
 
-#define LOG Serial
+const NimBLEUUID SERVICE_UUID((uint16_t)MATTER_BLE_SERVICE_UUID);
+const NimBLEUUID TX_UUID(MATTER_BLE_TX_UUID);
+const NimBLEUUID RX_UUID(MATTER_BLE_RX_UUID);
 
-static const NimBLEUUID SERVICE_UUID((uint16_t)MATTER_BLE_SERVICE_UUID);
-static const NimBLEUUID TX_UUID(MATTER_BLE_TX_UUID);
-static const NimBLEUUID RX_UUID(MATTER_BLE_RX_UUID);
-
-static NimBLEAdvertising* pAdvertising = nullptr;
-static NimBLECharacteristic* pTXCharacteristic = nullptr;
-static NimBLECharacteristic* pRXCharacteristic = nullptr;
-
-MatterSession* pase = nullptr;
+NimBLEAdvertising* pAdvertising = nullptr;
+NimBLECharacteristic* pTXCharacteristic = nullptr;
+NimBLECharacteristic* pRXCharacteristic = nullptr;
 bool ready = false;
 
 class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
-  void onRead(NimBLECharacteristic* pCharacteristic) {
-    LOG.print(pCharacteristic->getUUID().toString().c_str());
-    LOG.print(": onRead(), value: ");
-    LOG.println(pCharacteristic->getValue().length());
-  };
-
+public:
+  CharacteristicCallbacks(struct MatterSession* p) : pase(p) {}
+  struct MatterSession* pase;
   void onWrite(NimBLECharacteristic* pCharacteristic) {
     if (pCharacteristic == pTXCharacteristic) {
       auto v = pCharacteristic->getValue();
-      if (pase == nullptr) {
-        pase = pase_init();  // todo delete
-        ready = false;
-      }
       handle_btp_packet(pase, v.data(), v.size());
-    } else {
-      LOG.print(pCharacteristic->getUUID().toString().c_str());
-      LOG.print(": onWrite(), value: ");
-      LOG.println(pCharacteristic->getValue().length());
     }
-  };
-  /** Called before notification or indication is sent,
-   *  the value can be changed here before sending if desired.
-   */
-  void onNotify(NimBLECharacteristic* pCharacteristic) {
-    debug_dump("Sending notification to clients");
-  };
-
-  /** The status returned in status is defined in NimBLECharacteristic.h.
-   *  The value returned in code is the NimBLE host return code.
-   */
-  void onStatus(NimBLECharacteristic* pCharacteristic, Status status,
-                int code) {
-    String str = ("Notification/Indication status code: ");
-    str += status;
-    str += ", return code: ";
-    str += code;
-    str += ", ";
-    str += NimBLEUtils::returnCodeToString(code);
-    debug_dump(str.c_str());
   };
 
   void onSubscribe(NimBLECharacteristic* pCharacteristic,
@@ -68,6 +35,7 @@ class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
     if (subValue == 0) {
       str += " Unsubscribed to ";
       ready = false;
+      session_reset(pase);
     } else if (subValue == 1) {
       str += " Subscribed to notfications for ";
       ready = true;
@@ -110,8 +78,10 @@ void wait_for_commissioning_complete() {
   // Create the BLE Service
   NimBLEService* pService = pServer->createService(SERVICE_UUID);
 
+  MatterSession* pase = session_init();
+
   // Create BLE Characteristics
-  CharacteristicCallbacks chrCallbacks;
+  CharacteristicCallbacks chrCallbacks(pase);
   pTXCharacteristic =
       pService->createCharacteristic(TX_UUID, NIMBLE_PROPERTY::WRITE);
   pTXCharacteristic->setCallbacks(&chrCallbacks);
@@ -125,9 +95,8 @@ void wait_for_commissioning_complete() {
   pAdvertising = NimBLEDevice::getAdvertising();
   startAdv();
 
-  bool connected = false;
-  while (!connected) {
-    if (ready && pase != nullptr) {
+  while (get_network_state(pase) != MATTER_NETWORK_CONNECTED) {
+    if (ready) {
       uint8_t* data;
       uint16_t size = next_btp_packet_to_send(pase, &data);
       if (size > 0) {
@@ -135,12 +104,12 @@ void wait_for_commissioning_complete() {
         pRXCharacteristic->notify();
         debug_printf("SEND RESPONSE (%d bytes)", size);
       }
-      if (get_network_state(pase) == MATTER_NETWORK_CONNECTED) {
-        break;
-      }
     }
     delay(1);
   }
   delay(500);
   NimBLEDevice::deinit(true);
+  session_free(pase);
 }
+
+#endif

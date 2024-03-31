@@ -1,6 +1,7 @@
+#pragma once
 #include <stdint.h>
 
-#define MATTER_DEBUG_LOG
+// #define MATTER_DEBUG_LOG
 
 #ifdef MATTER_DEBUG_LOG
 #include <Arduino.h>

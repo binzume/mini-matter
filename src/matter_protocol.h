@@ -1,22 +1,23 @@
+#pragma once
 #include <stdint.h>
 
-#define BTP_H_MASK 0x40
-#define BTP_M_MASK 0x20
-#define BTP_A_MASK 0x08
-#define BTP_E_MASK 0x04
+#define BTP_H_FLAG 0x40
+#define BTP_M_FLAG 0x20
+#define BTP_A_FLAG 0x08
+#define BTP_E_FLAG 0x04
 #define BTP_C_FLAG 0x02
-#define BTP_B_MASK 0x01
+#define BTP_B_FLAG 0x01
 #define BTP_MAX_HEADER_SIZE 5
 
 static int btp_get_header_size(const uint8_t flags) {
   int sz = 1;
-  if (flags & BTP_A_MASK) {
+  if (flags & BTP_A_FLAG) {
     sz++;
   }
-  if ((flags & BTP_H_MASK) == 0) {
+  if ((flags & BTP_H_FLAG) == 0) {
     sz++;
   }
-  if (flags & BTP_B_MASK) {
+  if (flags & BTP_B_FLAG) {
     sz += 2;
   }
   return sz;
@@ -27,12 +28,12 @@ static int btp_get_header_size(const uint8_t *buf) {
 }
 
 static uint8_t btp_get_seq(const uint8_t *buf) {
-  return buf[(buf[0] & BTP_A_MASK) ? 2 : 1];
+  return buf[(buf[0] & BTP_A_FLAG) ? 2 : 1];
 }
 
 static int btp_write_header(uint8_t *buf, uint8_t ack, uint8_t seq,
                             uint16_t size) {
-  buf[0] = BTP_A_MASK | BTP_E_MASK | BTP_B_MASK;
+  buf[0] = BTP_A_FLAG | BTP_E_FLAG | BTP_B_FLAG;
   buf[1] = ack;
   buf[2] = seq;
   buf[3] = size & 0xff;
@@ -44,15 +45,15 @@ static int btp_write_header_f(uint8_t *buf, uint8_t flags, uint8_t ack,
                               uint8_t seq, uint16_t size) {
   buf[0] = flags;
   int sz = 1;
-  if (flags & BTP_A_MASK) {
+  if (flags & BTP_A_FLAG) {
     buf[sz] = ack;
     sz++;
   }
-  if ((flags & BTP_H_MASK) == 0) {
+  if ((flags & BTP_H_FLAG) == 0) {
     buf[sz] = seq;
     sz++;
   }
-  if (flags & BTP_B_MASK) {
+  if (flags & BTP_B_FLAG) {
     buf[sz] = size;
     buf[sz + 1] = size >> 8;
     sz += 2;

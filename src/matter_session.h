@@ -1,4 +1,5 @@
-#include "matter_sha256_esp32.h"
+#pragma once
+#include "matter_crypt.h"
 
 #define TT_CONTEXT_INIT "CHIP PAKE V1 Commissioning"
 

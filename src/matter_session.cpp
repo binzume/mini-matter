@@ -8,22 +8,28 @@
 #include "matter_protocol.h"
 #include "matter_wifi.h"
 
-MatterSession *pase_init() {
+MatterSession *session_init() {
   MatterSession *ctx = new MatterSession();
+  session_reset(ctx);
+  return ctx;
+}
+
+void session_reset(MatterSession *ctx) {
   ctx->recv_size = 0;
   ctx->send_size = 0;
   ctx->send_pos = 0;
   ctx->msg_count = 0;
   ctx->btp_tx_seq = 0;
   ctx->network_state = 0;
-  return ctx;
 }
+
+void session_free(MatterSession *ctx) { delete ctx; }
 
 int8_t get_network_state(MatterSession *ctx) { return ctx->network_state; }
 
 int handle_btp_handshake(MatterSession *ctx, const uint8_t *req, size_t reqsize,
                          uint8_t *res) {
-  res[0] = 0b1100101;
+  res[0] = BTP_H_FLAG | BTP_M_FLAG | BTP_B_FLAG | BTP_E_FLAG;
   res[1] = 0x6C;
   res[2] = 0x04;  // ver
   res[3] = 244;   // mtu
@@ -39,8 +45,6 @@ int handle_pbdkreq(MatterSession *ctx, const uint8_t *req, size_t reqsize,
   ctx->contextHash.update((uint8_t *)TT_CONTEXT_INIT, strlen(TT_CONTEXT_INIT));
 
   int pos = 0;
-  uint64_t sender = message_get_sender(req + pos);
-  pos += message_get_header_size(req + pos);
   uint16_t exchangeId = message_get_proto_echange_id(req + pos);
   pos += message_get_pheader_size(req + pos);
   ctx->contextHash.update(&req[pos], reqsize - pos);
@@ -62,7 +66,6 @@ int handle_pbdkreq(MatterSession *ctx, const uint8_t *req, size_t reqsize,
 
   // PBKDFParamResponse
   int l = 0;
-  l += message_write_header(res + l, 0, 1, sender);
   l += message_write_pheader(res + l, MSG_PROTO_OP_PBKD_RES, exchangeId,
                              MSG_PROTO_ID_SECURE, 0);
   pos = l;
@@ -84,8 +87,6 @@ int handle_pbdkreq(MatterSession *ctx, const uint8_t *req, size_t reqsize,
 int handle_pake1(MatterSession *ctx, const uint8_t *req, size_t reqsize,
                  uint8_t *res) {
   int pos = 0;
-  uint64_t sender = message_get_sender(req + pos);
-  pos += message_get_header_size(req + pos);
   uint16_t exchangeId = message_get_proto_echange_id(req + pos);
   pos += message_get_pheader_size(req + pos);
 
@@ -135,7 +136,6 @@ int handle_pake1(MatterSession *ctx, const uint8_t *req, size_t reqsize,
   }
 
   int l = 0;
-  l += message_write_header(res + l, 0, 2, sender);
   l += message_write_pheader(res + l, MSG_PROTO_OP_PASE_PAKE2, exchangeId,
                              MSG_PROTO_ID_SECURE, 0);
   l += tlv_write_struct(res + l, 0, 0);               // pbkdfparamresp-struct
@@ -147,9 +147,8 @@ int handle_pake1(MatterSession *ctx, const uint8_t *req, size_t reqsize,
 
 int handle_pake3(MatterSession *ctx, const uint8_t *req, size_t reqsize,
                  uint8_t *res) {
-  uint64_t sender = message_get_sender(req);
-  int pos = message_get_header_size(req);
-  uint16_t exchangeId = message_get_proto_echange_id(req + pos);
+  uint16_t exchangeId = message_get_proto_echange_id(req);
+  int pos = 0;
   pos += message_get_pheader_size(req + pos);
 
   const uint8_t *cA = nullptr;
@@ -165,7 +164,6 @@ int handle_pake3(MatterSession *ctx, const uint8_t *req, size_t reqsize,
   debug_dump("cA", cA, cA_len);
 
   int l = 0;
-  l += message_write_header(res + l, 0, 3, sender);
   l += message_write_pheader(res + l, MSG_PROTO_OP_STATUS_REPORT, exchangeId,
                              MSG_PROTO_ID_SECURE, 0);
   l += write_status_report(res + l, MSG_STATUS_REPORT_SUCCESS,
@@ -187,7 +185,6 @@ int encrypt_message(MatterSession *ctx, const uint8_t *msg, size_t msg_len,
   int header_len = message_get_header_size(msg);
   int data_len = msg_len - header_len;
   if (data_len <= 0) {
-    // debug_dump("nodata");
     return msg_len;
   }
   uint8_t nonce[13] = {0};
@@ -205,7 +202,6 @@ int decrypt_message(MatterSession *ctx, const uint8_t *msg, size_t msg_len,
   int header_len = message_get_header_size(msg);
   int data_len = msg_len - header_len - 16;
   if (data_len <= 0) {
-    // debug_dump("nodata");
     return 0;
   }
   uint8_t nonce[13] = {0};
@@ -449,42 +445,51 @@ int handle_invoke_command(MatterSession *ctx, const uint8_t *req,
 
 inline int handle_message(MatterSession *ctx, uint8_t *req, int reqsize,
                           uint8_t *res) {
-  // TODO: check message type
   int sz = 0;
+  size_t mhl = message_get_header_size(req);
   if (message_get_session_id(req) == 0) {
-    uint8_t opcode = message_get_proto_op(req + message_get_header_size(req));
+    size_t l =
+        message_write_header(res, 0, ctx->msg_count, message_get_sender(req));
+    uint8_t *payload = req + mhl;
+    size_t payload_len = reqsize - mhl;
+
+    uint8_t opcode = message_get_proto_op(payload);
     if (opcode == MSG_PROTO_OP_PBKD_REQ) {
-      sz = handle_pbdkreq(ctx, req, reqsize, res);
+      sz = handle_pbdkreq(ctx, payload, payload_len, res + l);
     } else if (opcode == MSG_PROTO_OP_PASE_PAKE1) {
-      sz = handle_pake1(ctx, req, reqsize, res);
+      sz = handle_pake1(ctx, payload, payload_len, res + l);
     } else if (opcode == MSG_PROTO_OP_PASE_PAKE3) {
-      sz = handle_pake3(ctx, req, reqsize, res);
+      sz = handle_pake3(ctx, payload, payload_len, res + l);
+    }
+    if (sz > 0) {
+      sz += l;
     }
   } else {
-    uint8_t *plain = req + message_get_header_size(req);
-    int len = decrypt_message(ctx, req, reqsize, plain);
+    uint8_t *plain = req + mhl;
+    size_t len = decrypt_message(ctx, req, reqsize, plain);
+    uint8_t opcode = message_get_proto_op(plain);
+    uint16_t exchange_id = message_get_proto_echange_id(plain);
+    int hl = message_get_pheader_size(plain);
+    uint8_t *payload = plain + hl;
+    size_t payload_len = len - hl;
+    int mhl = message_write_header(res, ctx->session_id, ctx->msg_count, 0);
     if (message_get_proto_id(plain) == MSG_PROTO_ID_INTERACTION_MODEL) {
-      uint16_t exchange_id = message_get_proto_echange_id(plain);
-      int hl = message_get_pheader_size(plain);
-      int mhl = message_write_header(res, ctx->session_id, ctx->msg_count, 0);
       int ret = 0, phl = 0;
-      if (message_get_proto_op(plain) == MSG_PROTO_OP_INTERACTION_READ) {
+      if (opcode == MSG_PROTO_OP_INTERACTION_READ) {
         phl = message_write_pheader(res + mhl, MSG_PROTO_OP_INTERACTION_DATA,
                                     exchange_id, MSG_PROTO_ID_INTERACTION_MODEL,
                                     0);
-        ret = handle_read_report(ctx, plain + hl, len - hl, res + mhl + phl);
-      } else if (message_get_proto_op(plain) ==
-                 MSG_PROTO_OP_INTERACTION_WRITE) {
+        ret = handle_read_report(ctx, payload, payload_len, res + mhl + phl);
+      } else if (opcode == MSG_PROTO_OP_INTERACTION_WRITE) {
         phl = message_write_pheader(
             res + mhl, MSG_PROTO_OP_INTERACTION_WRITE_RES, exchange_id,
             MSG_PROTO_ID_INTERACTION_MODEL, 0);
-        ret = handle_write_report(ctx, plain + hl, len - hl, res + mhl + phl);
-      } else if (message_get_proto_op(plain) ==
-                 MSG_PROTO_OP_INTERACTION_INVOKE) {
+        ret = handle_write_report(ctx, payload, payload_len, res + mhl + phl);
+      } else if (opcode == MSG_PROTO_OP_INTERACTION_INVOKE) {
         phl = message_write_pheader(
             res + mhl, MSG_PROTO_OP_INTERACTION_INVOKE_RES, exchange_id,
             MSG_PROTO_ID_INTERACTION_MODEL, 0);
-        ret = handle_invoke_command(ctx, plain + hl, len - hl, res + mhl + phl);
+        ret = handle_invoke_command(ctx, payload, payload_len, res + mhl + phl);
       }
       if (ret <= 0) {
         uint8_t status = -ret;
@@ -496,9 +501,7 @@ inline int handle_message(MatterSession *ctx, uint8_t *req, int reqsize,
         ret += tlv_write(res + mhl + phl + ret, 1, 0, status);
         ret += tlv_write_eos(res + mhl + phl + ret);
       }
-      if (ret > 0) {
-        sz = encrypt_message(ctx, res, mhl + phl + ret, res + mhl);
-      }
+      sz = encrypt_message(ctx, res, mhl + phl + ret, res + mhl);
     }
   }
   return sz;
@@ -506,7 +509,7 @@ inline int handle_message(MatterSession *ctx, uint8_t *req, int reqsize,
 
 uint16_t next_btp_packet_to_send(MatterSession *ctx, uint8_t **data) {
   if (ctx->send_pos >= ctx->send_size && ctx->recv_size > 0 &&
-      (ctx->recv_buf[0] & BTP_E_MASK) != 0) {
+      (ctx->recv_buf[0] & BTP_E_FLAG) != 0) {
     uint8_t *req = ctx->recv_buf;
     size_t reqsize = ctx->recv_size;
     ctx->recv_size = 0;
@@ -524,16 +527,6 @@ uint16_t next_btp_packet_to_send(MatterSession *ctx, uint8_t **data) {
     int sz = handle_message(ctx, req + p, reqsize - p,
                             ctx->send_buf + BTP_MAX_HEADER_SIZE);
     if (sz == 0) {
-      // TODO ack
-      /*
-        if (req[0] == BTP_A_MASK) {
-          res[0] = BTP_A_MASK;
-          res[1] = btp_get_seq(req);
-          res[2] = ctx->btp_count + 1;
-          return 3;
-        }
-        ctx->btp_count++;
-        */
       return 0;
     }
     ctx->msg_count++;
@@ -543,14 +536,14 @@ uint16_t next_btp_packet_to_send(MatterSession *ctx, uint8_t **data) {
   if (ctx->send_pos >= ctx->send_size) {
     return 0;
   }
-  uint8_t flags = ctx->send_pos == BTP_MAX_HEADER_SIZE ? BTP_B_MASK | BTP_A_MASK
+  uint8_t flags = ctx->send_pos == BTP_MAX_HEADER_SIZE ? BTP_B_FLAG | BTP_A_FLAG
                                                        : BTP_C_FLAG;
   uint16_t sz = ctx->send_size - ctx->send_pos;
   uint16_t hsz = btp_get_header_size(flags);
   if (sz > 244 - hsz) {
     sz = 244 - hsz;
   } else {
-    flags |= BTP_E_MASK;
+    flags |= BTP_E_FLAG;
   }
   uint8_t *buf = ctx->send_buf + ctx->send_pos - hsz;
   btp_write_header_f(buf, flags, ctx->btp_rx_seq, ++ctx->btp_tx_seq,
@@ -562,20 +555,22 @@ uint16_t next_btp_packet_to_send(MatterSession *ctx, uint8_t **data) {
 
 int handle_btp_packet(MatterSession *ctx, const uint8_t *req, int reqsize) {
   debug_dump("RECV BTP", req, reqsize);
-  if (reqsize < 2 || (req[0] & (BTP_B_MASK | BTP_E_MASK | BTP_C_FLAG)) == 0) {
-    return 0;  // no message data
+  if (reqsize < 2 || (req[0] & (BTP_B_FLAG | BTP_E_FLAG | BTP_C_FLAG)) == 0) {
+    // no message data
+    return 0;
   }
-  if (ctx->recv_size > 0 && (ctx->recv_buf[0] & BTP_E_MASK) == 0) {
+  if (ctx->recv_size > 0 && (ctx->recv_buf[0] & BTP_E_FLAG) == 0) {
     // concat packets
     size_t hl = btp_get_header_size(req);
     memcpy(ctx->recv_buf + ctx->recv_size, req + hl, reqsize - hl);
     ctx->btp_rx_seq = btp_get_seq(req);
     ctx->recv_size += reqsize - hl;
-    ctx->recv_buf[0] |= req[0] & BTP_E_MASK;
+    ctx->recv_buf[0] |= req[0] & BTP_E_FLAG;
     return 0;
   }
   if (ctx->recv_size > 0) {
-    return 1;  // busy
+    // busy
+    return 1;
   }
   memcpy(ctx->recv_buf, req, reqsize);
   ctx->recv_size = reqsize;

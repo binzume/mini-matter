@@ -1,3 +1,4 @@
+#pragma once
 #include "matter_config.h"
 #include "matter_utils.h"
 
