@@ -1,0 +1,27 @@
+{
+  "name": "mini-matter",
+  "description": "Simple Matter Library for ESP32",
+  "keywords": "Matter",
+  "authors": [
+    {
+      "name": "binzume",
+      "url": "https://github.com/binzume/"
+    }
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/binzume/mini-matter.git"
+  },
+  "version": "0.0.0",
+  "framework": "*",
+  "platforms": "*",
+  "build": {
+    "flags": "",
+    "scrFilter":[
+      "+<*.cpp>",
+      "+<*.c>",
+      "+<*.h>",
+      "+<example.cpp>"
+    ]
+  }
+}
